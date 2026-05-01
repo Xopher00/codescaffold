@@ -245,6 +245,24 @@ def _ensure_future_annotations(path: Path) -> bool:
     return True
 
 
+def _pre_create_dest_module(dest_path: Path) -> bool:
+    """Ensure dest_path exists and contains `from __future__ import annotations`.
+
+    Creates parent directories and an empty stub if the file doesn't exist yet,
+    then delegates to _ensure_future_annotations.
+
+    Returns True iff _ensure_future_annotations mutated the file (i.e. the import
+    was injected, not already present).
+    """
+    dest_path.parent.mkdir(parents=True, exist_ok=True)
+    if not dest_path.exists():
+        dest_path.write_text("from __future__ import annotations\n", encoding="utf-8")
+        # File now has the import — _ensure_future_annotations will return False
+        # (already present), so we return True to signal that we created+injected.
+        return True
+    return _ensure_future_annotations(dest_path)
+
+
 def _is_residue(path: Path) -> bool:
     """Return True if the file contains only: docstring, blank lines, __future__ imports, __all__.
 
@@ -1030,6 +1048,11 @@ def apply_plan(
             # Check if this file is now a residue
             if _is_residue(current_src):
                 log.info("residue cleanup: deleting %s", current_src)
+                rel_path = str(current_src.relative_to(repo_root))
+                try:
+                    stray_deleted_files[rel_path] = current_src.read_text(encoding="utf-8")
+                except OSError:
+                    stray_deleted_files[rel_path] = ""
                 try:
                     current_src.unlink()
                     applied.append(
@@ -1041,6 +1064,7 @@ def apply_plan(
                     )
                 except Exception as exc:
                     log.warning("Could not delete residue %s: %s", current_src, exc)
+                    stray_deleted_files.pop(rel_path, None)
 
         # --- F4: stray top-level __init__.py cleanup ---
         # If a top-level __init__.py was created as a side effect of rope's MoveModule

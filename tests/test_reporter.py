@@ -4,9 +4,10 @@ from pathlib import Path
 
 import pytest
 
+from refactor_plan.cleaner import DeadCodeReport, DeadSymbol
 from refactor_plan.cluster_view import build_view
 from refactor_plan.planner import plan
-from refactor_plan.reporter import render_dry_run_report, render_apply_report
+from refactor_plan.reporter import render_apply_report, render_dead_code_report_md, render_dry_run_report
 
 FIXTURE_GRAPH = (
     Path(__file__).parent
@@ -461,3 +462,53 @@ def test_render_apply_report_before_after_with_differing_views(refactor_plan, vi
     assert "synthetic_god" in content, (
         "After section should contain post_view god node 'synthetic_god'"
     )
+
+
+# ---------------------------------------------------------------------------
+# Dead code report rendering
+# ---------------------------------------------------------------------------
+
+
+def _make_dead_sym(
+    label: str = "dead_func()",
+    approved: bool = False,
+) -> DeadSymbol:
+    return DeadSymbol(
+        node_id="sym_x",
+        label=label,
+        source_file="pkg/mod.py",
+        source_location="L5",
+        rationale="0 incoming + not exported, isolated_nodes signal present. Degree=0.",
+        edge_context="0 EXTRACTED incoming, 2 INFERRED edges excluded",
+        approved=approved,
+    )
+
+
+def test_render_dead_code_report_md_contains_header():
+    """Rendered markdown must contain the DEAD_CODE_REPORT heading."""
+    report = DeadCodeReport(symbols=[_make_dead_sym()])
+    md = render_dead_code_report_md(report)
+    assert "# DEAD_CODE_REPORT" in md
+
+
+def test_render_dead_code_report_md_table_rows():
+    """Each DeadSymbol produces a table row with label, source file, approved marker."""
+    sym = _make_dead_sym(label="my_func()", approved=False)
+    report = DeadCodeReport(symbols=[sym])
+    md = render_dead_code_report_md(report)
+
+    assert "my_func()" in md
+    assert "pkg/mod.py" in md
+    assert "[ ]" in md  # unapproved
+    assert "EXTRACTED incoming" in md
+
+
+def test_render_dead_code_report_md_approved_marker():
+    """Approved=True → [x]; Approved=False → [ ]."""
+    approved = _make_dead_sym(label="good_func()", approved=True)
+    unapproved = _make_dead_sym(label="bad_func()", approved=False)
+    report = DeadCodeReport(symbols=[approved, unapproved])
+    md = render_dead_code_report_md(report)
+
+    assert "[x]" in md
+    assert "[ ]" in md

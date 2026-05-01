@@ -17,6 +17,7 @@ import graphify.analyze as ganalyze
 import graphify.cluster as gcluster
 import graphify.report as greport
 
+from refactor_plan.cleaner import DeadCodeReport
 from refactor_plan.cluster_view import GraphView, load_graph
 from refactor_plan.planner import RefactorPlan
 
@@ -469,3 +470,29 @@ def render_apply_report(
     report = "\n".join(str(s) for s in sections)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(report, encoding="utf-8")
+
+
+def render_dead_code_report_md(report: DeadCodeReport) -> str:
+    """Render a DeadCodeReport as a markdown table (DEAD_CODE_REPORT.md).
+
+    Approvals remain in the JSON; this function is output-only.
+    The Approved column shows `[x]` if entry.approved is True, else `[ ]`.
+    """
+    lines = ["# DEAD_CODE_REPORT", ""]
+    lines.append("| Label | Source file | Source location | Rationale | Approved |")
+    lines.append("|-------|-------------|-----------------|-----------|----------|")
+
+    for sym in report.symbols:
+        approved_str = "[x]" if sym.approved else "[ ]"
+        # Embed edge_context into rationale column for clarity
+        rationale_col = f"{sym.rationale} ({sym.edge_context})"
+        lines.append(
+            f"| {sym.label} | {sym.source_file} | {sym.source_location} "
+            f"| {rationale_col} | {approved_str} |"
+        )
+
+    if not report.symbols:
+        lines.append("| (none) | | | | |")
+
+    lines.append("")
+    return "\n".join(lines)
