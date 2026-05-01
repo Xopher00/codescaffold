@@ -6,7 +6,6 @@ to enforce architecture boundaries between pkg_NNN clusters.
 
 from __future__ import annotations
 
-import json
 from pathlib import Path
 
 import networkx as nx
@@ -71,7 +70,7 @@ def build_cluster_dag(plan: RefactorPlan, graph_json_path: Path) -> nx.DiGraph:
 
 def emit_contract(
     plan: RefactorPlan,
-    view: GraphView,
+    _view: GraphView,
     graph_json_path: Path,
     repo_root: Path,
     *,
@@ -162,7 +161,7 @@ def emit_contract(
     # --- Forbidden contract for AMBIGUOUS edges ---
     # Find all edges in the original graph with confidence == "AMBIGUOUS".
     # Group by (src_cluster, tgt_cluster).
-    ambiguous_pairs: dict[tuple[str, str], list[str]] = {}  # (src, tgt) -> list of node pairs
+    ambiguous_pairs: dict[tuple[str, str], list[tuple[str, str]]] = {}  # (src, tgt) -> list of (u, v) node-pairs
 
     for u, v, data in G.edges(data=True):
         if "rationale" in u or "rationale" in v:
@@ -177,7 +176,7 @@ def emit_contract(
                 ambiguous_pairs[key].append((u, v))
 
     # Emit one forbidden contract per ambiguous pair.
-    for (src_cluster, tgt_cluster), pairs in sorted(ambiguous_pairs.items()):
+    for (src_cluster, tgt_cluster), _pairs in sorted(ambiguous_pairs.items()):
         contract_id = f"forbidden_ambiguous_{src_cluster}_{tgt_cluster}"
         contracts.append(
             {

@@ -38,7 +38,7 @@ def view():
 
 @pytest.fixture(scope="module")
 def refactor_plan(view):
-    return plan(view, FIXTURE_REPO)
+    return plan(view, FIXTURE_REPO, FIXTURE_GRAPH)
 
 
 # ---------------------------------------------------------------------------
@@ -81,11 +81,12 @@ def test_at_least_one_file_move(refactor_plan):
 
 
 # ---------------------------------------------------------------------------
-# 5. Exactly 6 symbol moves, all unapproved, specific labels present
+# 5. Symbol moves: 5 non-method moves (A1 filters out .echo()), all unapproved
 # ---------------------------------------------------------------------------
 
-def test_six_symbol_moves(refactor_plan):
-    assert len(refactor_plan.symbol_moves) == 6
+def test_five_symbol_moves(refactor_plan):
+    # A1: method labels (starting with ".") are filtered — .echo() is excluded.
+    assert len(refactor_plan.symbol_moves) == 5
 
 
 def test_symbol_moves_all_unapproved(refactor_plan):
@@ -145,8 +146,8 @@ def test_splitting_candidates_are_sorted(refactor_plan):
 # ---------------------------------------------------------------------------
 
 def test_plan_is_deterministic(view):
-    plan_a = plan(view, FIXTURE_REPO)
-    plan_b = plan(view, FIXTURE_REPO)
+    plan_a = plan(view, FIXTURE_REPO, FIXTURE_GRAPH)
+    plan_b = plan(view, FIXTURE_REPO, FIXTURE_GRAPH)
     assert plan_a.model_dump() == plan_b.model_dump()
 
 
@@ -173,3 +174,97 @@ def test_cluster_ordering_by_size(refactor_plan):
         assert sizes[i] >= sizes[i + 1], (
             f"Cluster ordering violated at index {i}: {sizes}"
         )
+
+
+# ---------------------------------------------------------------------------
+# A1 — Methods must not appear in symbol_moves
+# ---------------------------------------------------------------------------
+
+def test_no_method_labels_in_symbol_moves(refactor_plan):
+    """A1: Labels starting with '.' (bound methods) must be filtered out."""
+    for sm in refactor_plan.symbol_moves:
+        assert not sm.label.startswith("."), (
+            f"Method label {sm.label!r} leaked into symbol_moves; "
+            "rope cannot move bound methods"
+        )
+
+
+# ---------------------------------------------------------------------------
+# A2 — Shim candidates: vec.py and reader.py trigger "in __all__"
+# ---------------------------------------------------------------------------
+
+def test_shim_candidates_include_vec_and_reader(refactor_plan):
+    """A2: vec.py defines Vec and reader.py defines Reader, both in __all__."""
+    shim_srcs = {sc.src for sc in refactor_plan.shim_candidates}
+    vec_shims = [sc for sc in refactor_plan.shim_candidates if sc.src.endswith("vec.py")]
+    reader_shims = [sc for sc in refactor_plan.shim_candidates if sc.src.endswith("reader.py")]
+    assert len(vec_shims) >= 1, f"Expected vec.py as shim candidate, got srcs: {shim_srcs}"
+    assert len(reader_shims) >= 1, f"Expected reader.py as shim candidate, got srcs: {shim_srcs}"
+    for sc in vec_shims:
+        assert "in __all__" in sc.triggers, f"Expected 'in __all__' trigger for {sc.src}"
+    for sc in reader_shims:
+        assert "in __all__" in sc.triggers, f"Expected 'in __all__' trigger for {sc.src}"
+
+
+def test_shim_candidates_count_at_least_two(refactor_plan):
+    """A2: At least 2 shim candidates (vec.py and reader.py)."""
+    assert len(refactor_plan.shim_candidates) >= 2
+
+
+# ---------------------------------------------------------------------------
+# A3 — dest_file is populated and consistent
+# ---------------------------------------------------------------------------
+
+def test_symbol_moves_have_dest_file(refactor_plan):
+    """A3: Every SymbolMove must have a non-empty dest_file."""
+    for sm in refactor_plan.symbol_moves:
+        assert sm.dest_file, f"SymbolMove {sm.label!r} has empty dest_file"
+
+
+def test_symbol_moves_dest_file_starts_with_dest_cluster(refactor_plan):
+    """A3: dest_file must start with dest_cluster + '/'."""
+    for sm in refactor_plan.symbol_moves:
+        assert sm.dest_file.startswith(sm.dest_cluster + "/"), (
+            f"dest_file {sm.dest_file!r} does not start with dest_cluster {sm.dest_cluster!r}/"
+        )
+
+
+def test_symbol_moves_no_unsorted_dest_file(refactor_plan):
+    """A3: No dest_file should end with _unsorted.py (abolished placeholder)."""
+    for sm in refactor_plan.symbol_moves:
+        assert not sm.dest_file.endswith("_unsorted.py"), (
+            f"SymbolMove {sm.label!r} still uses _unsorted.py: {sm.dest_file!r}"
+        )
+
+
+def test_read_first_line_dest_file(refactor_plan):
+    """A3: read_first_line() should land in pkg_003/reader.py (community 2 has only reader.py)."""
+    sm = next(
+        (s for s in refactor_plan.symbol_moves if "read_first_line" in s.label), None
+    )
+    assert sm is not None, "read_first_line() not found in symbol_moves"
+    assert sm.dest_file == "pkg_003/reader.py", (
+        f"Expected dest_file='pkg_003/reader.py', got {sm.dest_file!r}"
+    )
+
+
+def test_vec_from_pair_dest_file(refactor_plan):
+    """A3: vec_from_pair() should land in pkg_004/vec.py (community 3 has only vec.py)."""
+    sm = next(
+        (s for s in refactor_plan.symbol_moves if "vec_from_pair" in s.label), None
+    )
+    assert sm is not None, "vec_from_pair() not found in symbol_moves"
+    assert sm.dest_file == "pkg_004/vec.py", (
+        f"Expected dest_file='pkg_004/vec.py', got {sm.dest_file!r}"
+    )
+
+
+def test_distance_dest_file(refactor_plan):
+    """A3: distance() should land in pkg_004/vec.py (community 3 has only vec.py)."""
+    sm = next(
+        (s for s in refactor_plan.symbol_moves if "distance" in s.label), None
+    )
+    assert sm is not None, "distance() not found in symbol_moves"
+    assert sm.dest_file == "pkg_004/vec.py", (
+        f"Expected dest_file='pkg_004/vec.py', got {sm.dest_file!r}"
+    )

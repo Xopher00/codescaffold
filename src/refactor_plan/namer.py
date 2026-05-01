@@ -25,6 +25,7 @@ from __future__ import annotations
 import logging
 import subprocess
 from pathlib import Path
+from typing import cast
 
 from pydantic import BaseModel
 
@@ -175,7 +176,7 @@ def gather_context(
     plan: RefactorPlan,
     view: GraphView,
     repo_root: Path,
-    graph_json_path: Path,
+    _graph_json_path: Path,
     *,
     use_wiki: bool = True,
     use_explain: bool = True,
@@ -263,6 +264,7 @@ def name_clusters(
         structural changes.
     """
     import anthropic
+    from anthropic.types import TextBlockParam
 
     if anthropic_client is None:
         anthropic_client = anthropic.Anthropic()
@@ -276,12 +278,15 @@ def name_clusters(
         use_explain=use_explain,
     )
 
-    system = [
-        {
-            "type": "text",
-            "text": context,
-            "cache_control": {"type": "ephemeral"},
-        },
+    system: list[TextBlockParam] = [
+        cast(
+            TextBlockParam,
+            {
+                "type": "text",
+                "text": context,
+                "cache_control": {"type": "ephemeral"},
+            },
+        ),
     ]
 
     instruction = (
@@ -297,6 +302,9 @@ def name_clusters(
         messages=[{"role": "user", "content": instruction}],
         output_format=RenameMap,
     )
+    # B3: guard against None parsed_output (SDK type includes None even in parse mode)
+    if response.parsed_output is None:
+        raise RuntimeError("Anthropic response had no parsed_output")
     return response.parsed_output
 
 

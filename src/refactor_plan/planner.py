@@ -5,9 +5,11 @@ Algorithm overview
 1. Allocate pkg_NNN names: sort file_clusters by len(files) descending,
    tie-break by lowest cluster id. Largest → pkg_001, next → pkg_002, etc.
 2. File moves: dest = pkg_NNN/<basename>. Skip if src == dest (no-op).
-3. Symbol moves: direct passthrough from view.misplaced_symbols.
+3. Symbol moves: passthrough from view.misplaced_symbols, excluding methods
+   (labels starting with "."). Each symbol gets a dest_file chosen by
+   counting graph edges to nodes in the dest cluster's files.
 4. Shim candidates: repo-introspection only (ast + tomllib), three triggers:
-   A. file stem appears in any top-level __init__.py's __all__ (exact match).
+   A. file defines a top-level name appearing in any __init__.py's __all__.
    B. file is directly under <repo_root>/src/ or <repo_root>/ (top-level pkg).
    C. file appears in pyproject.toml [project.scripts] or [project.entry-points.*].
 5. Splitting candidates: passthrough from view.suggested_questions, types
@@ -16,14 +18,9 @@ Algorithm overview
 
 Shim matching rule (Trigger A)
 -------------------------------
-A file's stem (basename without .py) is compared against every entry in
-__all__ using exact string comparison. No case-folding.
-
-For the fixture: messy_pkg/__init__.py has __all__ = ["Vec", "Reader"].
-The stems "vec" and "reader" do NOT match "Vec" and "Reader" exactly, so
-no Trigger A shim candidates are emitted. Trigger B fires only if the file
-lives directly under <repo_root>/src/ or <repo_root>/ itself. Trigger C
-fires only if the file path appears in pyproject.toml scripts/entry-points.
+A file's top-level ClassDef/FunctionDef/AsyncFunctionDef/Assign names are
+intersected with every entry in __all__ across all __init__.py files.
+If the intersection is non-empty, trigger "in __all__" fires.
 """
 
 from __future__ import annotations
@@ -32,6 +29,8 @@ import ast
 import sys
 from pathlib import Path
 
+import networkx as nx
+
 if sys.version_info >= (3, 11):
     import tomllib
 else:
@@ -39,7 +38,7 @@ else:
 
 from pydantic import BaseModel
 
-from refactor_plan.cluster_view import GraphView
+from refactor_plan.cluster_view import GraphView, load_graph
 
 
 class FileMove(BaseModel):
@@ -54,6 +53,7 @@ class SymbolMove(BaseModel):
     label: str
     src_file: str
     dest_cluster: str    # pkg_NNN where target_community lives
+    dest_file: str       # repo-relative path: dest_cluster/<basename>
     host_community: int
     target_community: int
     approved: bool = False  # human-gated
@@ -126,6 +126,36 @@ def _collect_all_exports(repo_root: Path) -> set[str]:
     return exports
 
 
+# Cache of top-level names per absolute file path (populated lazily).
+_top_level_names_cache: dict[Path, set[str]] = {}
+
+
+def _top_level_names(src_path: Path) -> set[str]:
+    """Return names of top-level ClassDef, FunctionDef, AsyncFunctionDef, and
+    simple Assign targets (ast.Name only) in src_path.
+
+    Results are cached by absolute path to avoid re-parsing for every cluster.
+    """
+    abs_path = src_path.resolve()
+    if abs_path in _top_level_names_cache:
+        return _top_level_names_cache[abs_path]
+    try:
+        tree = ast.parse(abs_path.read_text(encoding="utf-8"))
+    except (SyntaxError, OSError):
+        _top_level_names_cache[abs_path] = set()
+        return set()
+    names: set[str] = set()
+    for node in ast.iter_child_nodes(tree):
+        if isinstance(node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)):
+            names.add(node.name)
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                if isinstance(target, ast.Name):
+                    names.add(target.id)
+    _top_level_names_cache[abs_path] = names
+    return names
+
+
 def _parse_pyproject_scripts(repo_root: Path) -> set[str]:
     """Return file paths (values) from pyproject.toml [project.scripts] and
     [project.entry-points.*]. Entry-point values are of the form
@@ -154,10 +184,20 @@ def _shim_triggers(src: str, repo_root: Path, all_exports: set[str], pyproject_r
     """Return list of trigger names that fire for this source file."""
     triggers: list[str] = []
     p = Path(src)
-    stem = p.stem  # filename without .py
 
-    # Trigger A: stem appears exactly in any __all__
-    if stem in all_exports:
+    # Trigger A: file defines a top-level name that appears in any __all__.
+    # We compare top-level ClassDef/FunctionDef/AsyncFunctionDef/Assign names
+    # against the collected __all__ exports (exact match, case-sensitive).
+    # Path resolution: src may be an abs-style relative path from graphify output
+    # (e.g. "tests/fixtures/messy_repo/messy_pkg/vec.py"), which doesn't resolve
+    # correctly via repo_root / src. Try direct Path(src) first (relative to CWD),
+    # then repo_root / src, then repo_root / basename as last resort.
+    src_path: Path | None = None
+    for candidate in [repo_root / src, Path(src), repo_root / Path(src).name]:
+        if candidate.exists():
+            src_path = candidate
+            break
+    if src_path is not None and bool(_top_level_names(src_path) & all_exports):
         triggers.append("in __all__")
 
     # Trigger B: file is directly under <repo_root>/src/ or <repo_root>/
@@ -188,8 +228,91 @@ def _shim_triggers(src: str, repo_root: Path, all_exports: set[str], pyproject_r
 # Public API
 # ---------------------------------------------------------------------------
 
-def plan(view: GraphView, repo_root: Path) -> RefactorPlan:
-    """Turn a GraphView into a RefactorPlan (deterministic, no new analysis)."""
+def _dest_file_for_symbol(
+    symbol_id: str,
+    host_file: str,
+    target_community: int,
+    dest_cluster: str,
+    view: GraphView,
+    G: nx.Graph,
+    repo_root: Path,
+) -> str:
+    """Choose the destination file for a misplaced symbol by counting graph edges.
+
+    Algorithm (deterministic):
+    1. Gather candidate files from the target community's FileCluster.
+    2. Filter: skip the symbol's host file; keep only files that exist on disk.
+    3. For each candidate, count edges in G between symbol_id and any node
+       whose source_file matches that candidate (rationale nodes excluded).
+    4. Pick the file with the highest count.
+       Ties broken by lowest Path(f).name lexicographically.
+    5. Fallback 1: if no candidate has >=1 edge, pick the candidate whose
+       basename matches the host file's stem (e.g. god.py → god.py in dest).
+    6. Fallback 2: if still no match, pick the lexicographically first candidate.
+    7. Returns dest_cluster/<basename>.
+    """
+    target_fc = next((fc for fc in view.file_clusters if fc.id == target_community), None)
+    if target_fc is None:
+        # Degenerate: no cluster info; use a default name
+        return f"{dest_cluster}/{Path(host_file).name}"
+
+    def _file_exists_on_disk(f: str) -> bool:
+        """Check if a source file from the graph exists on disk (handles graphify paths)."""
+        for candidate in [repo_root / f, Path(f)]:
+            if candidate.exists():
+                return True
+        return False
+
+    # Gather candidates: existing files in target cluster, excluding host file
+    candidates = [
+        f for f in target_fc.files
+        if f != host_file and _file_exists_on_disk(f)
+    ]
+    # If no candidates remain (e.g. all filtered out), include them anyway
+    if not candidates:
+        candidates = [f for f in target_fc.files if f != host_file]
+    if not candidates:
+        # Only file in cluster is the host — just use host basename in dest
+        return f"{dest_cluster}/{Path(host_file).name}"
+
+    # Count edges from symbol_id to nodes in each candidate file
+    neighbors = list(G.neighbors(symbol_id)) if symbol_id in G else []
+    file_counts: dict[str, int] = {f: 0 for f in candidates}
+    for nb in neighbors:
+        if "rationale" in nb:
+            continue
+        nb_source = G.nodes[nb].get("source_file", "")
+        if nb_source in file_counts:
+            file_counts[nb_source] += 1
+
+    max_count = max(file_counts.values())
+    if max_count >= 1:
+        # Pick highest-count file; tie-break by lexicographic basename
+        chosen = min(
+            (f for f, c in file_counts.items() if c == max_count),
+            key=lambda f: Path(f).name,
+        )
+    else:
+        # Fallback 1: basename matches host file's stem
+        host_stem = Path(host_file).stem
+        fallback1 = next(
+            (f for f in candidates if Path(f).stem == host_stem), None
+        )
+        if fallback1 is not None:
+            chosen = fallback1
+        else:
+            # Fallback 2: lexicographically first candidate
+            chosen = min(candidates, key=lambda f: Path(f).name)
+
+    return f"{dest_cluster}/{Path(chosen).name}"
+
+
+def plan(view: GraphView, repo_root: Path, graph_json_path: Path | None = None) -> RefactorPlan:
+    """Turn a GraphView into a RefactorPlan (deterministic, no new analysis).
+
+    graph_json_path is required for A3 (dest_file computation). When None,
+    symbol dest_file falls back to dest_cluster/<host_basename>.
+    """
 
     # 1. Allocate pkg_NNN names.
     community_to_pkg = _allocate_pkg_names(view)
@@ -228,19 +351,47 @@ def plan(view: GraphView, repo_root: Path) -> RefactorPlan:
     # Sort globally by (cluster, src) for determinism.
     file_moves.sort(key=lambda m: (m.cluster, m.src))
 
-    # 3. Symbol moves (passthrough, all approved=False).
-    symbol_moves: list[SymbolMove] = [
-        SymbolMove(
-            symbol_id=m.symbol_id,
-            label=m.label,
-            src_file=m.host_file,
-            dest_cluster=community_to_pkg[m.target_community],
-            host_community=m.host_community,
-            target_community=m.target_community,
-            approved=False,
+    # Load graph for dest_file computation (A3).
+    G: nx.Graph | None = None
+    if graph_json_path is not None:
+        try:
+            G = load_graph(graph_json_path)
+        except Exception:
+            G = None
+
+    # 3. Symbol moves: skip methods (A1). Compute dest_file (A3).
+    symbol_moves: list[SymbolMove] = []
+    for m in view.misplaced_symbols:
+        # A1: skip bound methods — rope's create_move operates on top-level
+        # definitions only; passing methods causes "Destination attribute not found".
+        if m.label.startswith("."):
+            continue
+        dest_cluster = community_to_pkg[m.target_community]
+        # A3: pick per-symbol dest file by counting graph edges
+        if G is not None:
+            dest_file = _dest_file_for_symbol(
+                m.symbol_id,
+                m.host_file,
+                m.target_community,
+                dest_cluster,
+                view,
+                G,
+                repo_root,
+            )
+        else:
+            dest_file = f"{dest_cluster}/{Path(m.host_file).name}"
+        symbol_moves.append(
+            SymbolMove(
+                symbol_id=m.symbol_id,
+                label=m.label,
+                src_file=m.host_file,
+                dest_cluster=dest_cluster,
+                dest_file=dest_file,
+                host_community=m.host_community,
+                target_community=m.target_community,
+                approved=False,
+            )
         )
-        for m in view.misplaced_symbols
-    ]
     # misplaced_symbols already sorted by (host_file, label) in cluster_view.
     symbol_moves.sort(key=lambda s: (s.src_file, s.label))
 

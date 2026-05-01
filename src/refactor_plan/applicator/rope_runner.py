@@ -39,7 +39,7 @@ from pydantic import BaseModel
 from rope.base import libutils
 from rope.base.project import Project
 from rope.refactor.importutils import ImportOrganizer
-from rope.refactor.move import MoveModule, create_move
+from rope.refactor.move import MoveGlobal, MoveModule, create_move
 
 from refactor_plan.planner import RefactorPlan
 
@@ -132,7 +132,7 @@ def _preflight_file(
 
     # Build a map: symbol_name -> byte offset of its Name node
     name_to_offset: dict[str, int] = {}
-    for node, span in spans.items():
+    for node in spans:
         if isinstance(node, (cst.FunctionDef, cst.ClassDef)):
             name_node = node.name
             if name_node in spans:
@@ -260,6 +260,29 @@ def apply_plan(
                 log.warning("Skipping file move: cannot resolve %s under %s", fm.src, repo_root)
                 continue
 
+            # A4: skip __init__.py files — rope's MoveModule treats an __init__.py
+            # as a "move package" operation, which nests the entire source package
+            # under the dest folder (e.g. pkg_001/messy_pkg/__init__.py) and may
+            # also leave a stray top-level __init__.py. We handle the package init
+            # via a direct pathlib copy instead of MoveModule, then skip rope.
+            if resolved_src.name == "__init__.py":
+                dest_pkg_path = repo_root / fm.cluster
+                dest_pkg_path.mkdir(parents=True, exist_ok=True)
+                init_file = dest_pkg_path / "__init__.py"
+                if not init_file.exists():
+                    init_file.write_text(resolved_src.read_text(encoding="utf-8"))
+                    created_init_files.append(init_file)
+                # Record as applied (no rope history entry for this pathlib copy)
+                history_index = len(project.history.undo_list)
+                applied.append(
+                    AppliedAction(
+                        kind="file_move",
+                        description=f"Copied {fm.src} → {fm.dest} (pathlib; skipped rope for __init__.py)",
+                        history_index=history_index,
+                    )
+                )
+                continue
+
             # Ensure dest package dir exists with __init__.py
             dest_pkg_path = repo_root / fm.cluster
             dest_pkg_path.mkdir(parents=True, exist_ok=True)
@@ -270,9 +293,11 @@ def apply_plan(
 
             try:
                 src_resource = libutils.path_to_resource(project, str(resolved_src))
+                assert src_resource is not None, f"resource not found: {resolved_src}"
                 dest_resource = libutils.path_to_resource(
                     project, str(dest_pkg_path), type="folder"
                 )
+                assert dest_resource is not None, f"resource not found: {dest_pkg_path}"
                 mover = MoveModule(project, src_resource)
                 changes = mover.get_changes(dest_resource)
                 project.do(changes)
@@ -289,7 +314,8 @@ def apply_plan(
                 if dest_file.exists():
                     try:
                         dest_res = libutils.path_to_resource(project, str(dest_file))
-                        affected_resources.append(dest_res)
+                        if dest_res is not None:
+                            affected_resources.append(dest_res)
                     except Exception:
                         pass
             except Exception as exc:
@@ -304,6 +330,13 @@ def apply_plan(
 
         # --- symbol moves ---
         # Offsets computed NOW, after file moves, from current file content.
+        #
+        # A7 note: rope's resource objects cache file state. When two symbols share
+        # the same dest_file, the second create_move must see the post-first-move
+        # content. We re-resolve the dest_resource immediately before each
+        # create_move call (inside the loop) rather than hoisting it above the
+        # loop, so rope always reads the current on-disk state. This prevents the
+        # second move from silently discarding the first symbol.
         for sm in symbol_moves_to_apply:
             # Find file at its *current* location (may have been relocated by rope)
             current_src = _find_current_path(repo_root, sm.src_file)
@@ -325,21 +358,31 @@ def apply_plan(
             if offset is None:
                 continue  # escalation already recorded in _preflight_file
 
-            # Destination module for moveglobal
-            dest_cluster_path = repo_root / sm.dest_cluster
+            # Destination module: use sm.dest_file (A3 — per-symbol dest file,
+            # chosen by edge count in the planner). The path is repo-relative:
+            # e.g. "pkg_004/vec.py".
+            dest_module_path = repo_root / sm.dest_file
+            dest_cluster_path = dest_module_path.parent
             if not dest_cluster_path.exists():
                 dest_cluster_path.mkdir(parents=True, exist_ok=True)
                 init = dest_cluster_path / "__init__.py"
                 init.touch()
                 created_init_files.append(init)
-            dest_module_path = dest_cluster_path / "_unsorted.py"
             if not dest_module_path.exists():
                 dest_module_path.write_text("")
 
             try:
                 src_resource = libutils.path_to_resource(project, str(current_src))
+                assert src_resource is not None, f"resource not found: {current_src}"
+                # Re-resolve dest resource each iteration so rope sees post-prior-move
+                # content (A7 fix: prevents second move to same file from dropping first).
                 dest_resource = libutils.path_to_resource(project, str(dest_module_path))
+                assert dest_resource is not None, f"resource not found: {dest_module_path}"
                 mover = create_move(project, src_resource, offset)
+                # create_move returns MoveGlobal | MoveMethod | MoveModule | MoveResource;
+                # for offsets at top-level defs we always get MoveGlobal, whose
+                # get_changes accepts a Resource (not a str dest_attr like MoveMethod).
+                assert isinstance(mover, MoveGlobal)
                 changes = mover.get_changes(dest_resource)
                 project.do(changes)
                 history_index = len(project.history.undo_list)
@@ -348,7 +391,7 @@ def apply_plan(
                         kind="symbol_move",
                         description=(
                             f"Moved symbol {sm.label} from {sm.src_file} "
-                            f"→ {sm.dest_cluster}/_unsorted.py"
+                            f"→ {sm.dest_file}"
                         ),
                         history_index=history_index,
                     )
@@ -356,7 +399,8 @@ def apply_plan(
                 if dest_module_path.exists():
                     try:
                         dest_res = libutils.path_to_resource(project, str(dest_module_path))
-                        affected_resources.append(dest_res)
+                        if dest_res is not None:
+                            affected_resources.append(dest_res)
                     except Exception:
                         pass
             except Exception as exc:

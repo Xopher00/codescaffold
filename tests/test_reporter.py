@@ -25,7 +25,7 @@ def view():
 
 @pytest.fixture(scope="module")
 def refactor_plan(view):
-    return plan(view, FIXTURE_REPO)
+    return plan(view, FIXTURE_REPO, FIXTURE_GRAPH)
 
 
 # ---------------------------------------------------------------------------
@@ -149,7 +149,7 @@ def test_render_dry_run_report_is_deterministic(refactor_plan, view, tmp_path):
     content1 = path1.read_text(encoding="utf-8")
     content2 = path2.read_text(encoding="utf-8")
 
-    assert content1 == content2
+    assert content1 == content2  # dry-run determinism
 
 
 # ---------------------------------------------------------------------------
@@ -396,4 +396,68 @@ def test_render_apply_report_is_deterministic(refactor_plan, view, tmp_path):
     content1 = path1.read_text(encoding="utf-8")
     content2 = path2.read_text(encoding="utf-8")
 
-    assert content1 == content2
+    assert content1 == content2  # apply determinism
+
+
+# ---------------------------------------------------------------------------
+# A6 — Apply report shows Before and After sections for god_nodes etc.
+# ---------------------------------------------------------------------------
+
+
+def test_render_apply_report_contains_before_after_markers(refactor_plan, view, tmp_path):
+    """A6: Apply report must contain both ### Before and ### After within god_nodes section."""
+    output_path = tmp_path / "report.md"
+    manifest = {}
+    validation = {}
+
+    render_apply_report(
+        refactor_plan,
+        view,
+        view,
+        FIXTURE_GRAPH,
+        FIXTURE_GRAPH,
+        manifest,
+        validation,
+        output_path,
+        repo_root=FIXTURE_REPO,
+    )
+
+    content = output_path.read_text(encoding="utf-8")
+    assert "### Before" in content, "Apply report missing '### Before' marker"
+    assert "### After" in content, "Apply report missing '### After' marker"
+
+
+def test_render_apply_report_before_after_with_differing_views(refactor_plan, view, tmp_path):
+    """A6: When pre_view and post_view differ, both Before and After sections appear."""
+    from refactor_plan.cluster_view import GraphView
+
+    # Build a synthetic post_view with different god_nodes
+    post_view = GraphView(
+        file_clusters=view.file_clusters,
+        misplaced_symbols=view.misplaced_symbols,
+        god_nodes=[{"label": "synthetic_god", "edges": 999}],
+        surprising_connections=view.surprising_connections,
+        suggested_questions=view.suggested_questions,
+        community_cohesion=view.community_cohesion,
+    )
+
+    output_path = tmp_path / "report.md"
+    render_apply_report(
+        refactor_plan,
+        view,
+        post_view,
+        FIXTURE_GRAPH,
+        FIXTURE_GRAPH,
+        {},
+        None,
+        output_path,
+        repo_root=FIXTURE_REPO,
+    )
+
+    content = output_path.read_text(encoding="utf-8")
+    assert "### Before" in content, "Apply report missing '### Before' in god_nodes delta"
+    assert "### After" in content, "Apply report missing '### After' in god_nodes delta"
+    # The synthetic post_view god node label should appear in the After section
+    assert "synthetic_god" in content, (
+        "After section should contain post_view god node 'synthetic_god'"
+    )

@@ -14,7 +14,6 @@ from datetime import datetime
 from pathlib import Path
 
 import graphify.analyze as ganalyze
-import graphify.build as gbuild
 import graphify.cluster as gcluster
 import graphify.report as greport
 
@@ -224,20 +223,15 @@ def _make_token_cost_stub() -> dict:
     return {"input": 0, "output": 0}
 
 
-def render_dry_run_report(
-    plan: RefactorPlan,
-    view: GraphView,
-    output_path: Path,
-    *,
-    repo_root: Path | None = None,
-) -> None:
-    """Dry-run: delta header + cluster summary + plan tables. No graphify.report.generate yet.
+def render_dry_run_report_text(view: GraphView, plan: RefactorPlan) -> str:
+    """Dry-run: delta header + cluster summary + plan tables. Returns text (no write).
 
     Args:
-        plan: The RefactorPlan to render.
         view: The GraphView containing structural analysis.
-        output_path: Path where to write the report.
-        repo_root: Optional repository root (not used in dry-run phase).
+        plan: The RefactorPlan to render.
+
+    Returns:
+        The rendered report as a string.
     """
     sections = [
         _format_header(plan, view),
@@ -251,7 +245,16 @@ def render_dry_run_report(
         _format_suggested_questions(view),
     ]
 
-    report = "\n".join(sections)
+    return "\n".join(sections)
+
+
+def render_dry_run_report(
+    plan: RefactorPlan,
+    view: GraphView,
+    output_path: Path,
+) -> None:
+    """Dry-run: delta header + cluster summary + plan tables."""
+    report = render_dry_run_report_text(view, plan)
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(report, encoding="utf-8")
 
@@ -368,6 +371,81 @@ def render_apply_report(
         manifest_str += f"- Imports organized: {imports_organized}\n"
     manifest_str += "\n"
 
+    # Format before/after god_nodes section
+    def _format_god_nodes_before_after(pre: GraphView, post: GraphView) -> str:
+        lines = ["## God nodes (high edge count)", ""]
+        lines.append("### Before")
+        lines.append("")
+        if pre.god_nodes:
+            for node in pre.god_nodes[:5]:
+                label = node.get("label", node.get("id", "unknown"))
+                edges = node.get("edges", 0)
+                lines.append(f"- `{label}`: {edges} edges")
+        else:
+            lines.append("(no god nodes detected)")
+        lines.append("")
+        lines.append("### After")
+        lines.append("")
+        if post.god_nodes:
+            for node in post.god_nodes[:5]:
+                label = node.get("label", node.get("id", "unknown"))
+                edges = node.get("edges", 0)
+                lines.append(f"- `{label}`: {edges} edges")
+        else:
+            lines.append("(no god nodes detected)")
+        lines.append("")
+        return "\n".join(lines)
+
+    def _format_surprising_connections_before_after(pre: GraphView, post: GraphView) -> str:
+        lines = ["## Surprising connections (cross-community edges)", ""]
+        lines.append("### Before")
+        lines.append("")
+        if pre.surprising_connections:
+            for conn in pre.surprising_connections[:10]:
+                question = conn.get("question", "unknown")
+                why = conn.get("why", "")
+                lines.append(f"- {question}")
+                if why:
+                    lines.append(f"  - Why: {why}")
+        else:
+            lines.append("(no surprising connections detected)")
+        lines.append("")
+        lines.append("### After")
+        lines.append("")
+        if post.surprising_connections:
+            for conn in post.surprising_connections[:10]:
+                question = conn.get("question", "unknown")
+                why = conn.get("why", "")
+                lines.append(f"- {question}")
+                if why:
+                    lines.append(f"  - Why: {why}")
+        else:
+            lines.append("(no surprising connections detected)")
+        lines.append("")
+        return "\n".join(lines)
+
+    def _format_suggested_questions_before_after(pre: GraphView, post: GraphView) -> str:
+        lines = ["## Suggested questions", ""]
+        lines.append("### Before")
+        lines.append("")
+        if pre.suggested_questions:
+            for question in pre.suggested_questions:
+                q_text = question.get("question", "unknown")
+                lines.append(f"- {q_text}")
+        else:
+            lines.append("(no suggested questions)")
+        lines.append("")
+        lines.append("### After")
+        lines.append("")
+        if post.suggested_questions:
+            for question in post.suggested_questions:
+                q_text = question.get("question", "unknown")
+                lines.append(f"- {q_text}")
+        else:
+            lines.append("(no suggested questions)")
+        lines.append("")
+        return "\n".join(lines)
+
     # Assemble full report
     sections = [
         _format_header(plan, pre_view),
@@ -376,9 +454,9 @@ def render_apply_report(
         _format_symbol_moves_table(plan),
         _format_shim_candidates_table(plan),
         _format_splitting_candidates(plan),
-        _format_god_nodes(pre_view),
-        _format_surprising_connections(pre_view),
-        _format_suggested_questions(pre_view),
+        _format_god_nodes_before_after(pre_view, post_view),
+        _format_surprising_connections_before_after(pre_view, post_view),
+        _format_suggested_questions_before_after(pre_view, post_view),
         "\n## Pre-apply graphify report\n\n",
         pre_report,
         "\n## Post-apply graphify report\n\n",
