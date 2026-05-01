@@ -236,6 +236,7 @@ def _dest_file_for_symbol(
     view: GraphView,
     G: nx.Graph,
     repo_root: Path,
+    file_to_mod: dict[str, str],
 ) -> str:
     """Choose the destination file for a misplaced symbol by counting graph edges.
 
@@ -249,12 +250,13 @@ def _dest_file_for_symbol(
     5. Fallback 1: if no candidate has >=1 edge, pick the candidate whose
        basename matches the host file's stem (e.g. god.py → god.py in dest).
     6. Fallback 2: if still no match, pick the lexicographically first candidate.
-    7. Returns dest_cluster/<basename>.
+    7. Returns dest_cluster/mod_MMM.py (placeholder name via file_to_mod).
     """
     target_fc = next((fc for fc in view.file_clusters if fc.id == target_community), None)
     if target_fc is None:
-        # Degenerate: no cluster info; use a default name
-        return f"{dest_cluster}/{Path(host_file).name}"
+        # Degenerate: no cluster info; fall back to host file's mod name if available
+        mod_name = file_to_mod.get(host_file, f"mod_001.py")
+        return f"{dest_cluster}/{mod_name}"
 
     def _file_exists_on_disk(f: str) -> bool:
         """Check if a source file from the graph exists on disk (handles graphify paths)."""
@@ -272,8 +274,9 @@ def _dest_file_for_symbol(
     if not candidates:
         candidates = [f for f in target_fc.files if f != host_file]
     if not candidates:
-        # Only file in cluster is the host — just use host basename in dest
-        return f"{dest_cluster}/{Path(host_file).name}"
+        # Only file in cluster is the host — use the host's mod name in dest
+        mod_name = file_to_mod.get(host_file, "mod_001.py")
+        return f"{dest_cluster}/{mod_name}"
 
     # Count edges from symbol_id to nodes in each candidate file
     neighbors = list(G.neighbors(symbol_id)) if symbol_id in G else []
@@ -304,7 +307,13 @@ def _dest_file_for_symbol(
             # Fallback 2: lexicographically first candidate
             chosen = min(candidates, key=lambda f: Path(f).name)
 
-    return f"{dest_cluster}/{Path(chosen).name}"
+    # Route chosen source path through file_to_mod to get the placeholder name.
+    # file_to_mod is built from all clusters, so chosen is guaranteed to be keyed.
+    assert chosen in file_to_mod, (
+        f"Chosen file {chosen!r} not found in file_to_mod; "
+        "this indicates a cluster data inconsistency"
+    )
+    return f"{dest_cluster}/{file_to_mod[chosen]}"
 
 
 def plan(view: GraphView, repo_root: Path, graph_json_path: Path | None = None) -> RefactorPlan:
@@ -332,12 +341,20 @@ def plan(view: GraphView, repo_root: Path, graph_json_path: Path | None = None) 
         for fc in sorted_clusters
     ]
 
+    # 1b. Allocate per-cluster file mapping: original_path → mod_MMM.py basename.
+    # Within each cluster, files are sorted ascending by path (same key used
+    # everywhere) so the assignment is deterministic.
+    file_to_mod: dict[str, str] = {}
+    for cluster in clusters:
+        for mmm, src in enumerate(sorted(cluster.files), start=1):
+            file_to_mod[src] = f"mod_{mmm:03d}.py"
+
     # 2. File moves (sorted by src for determinism).
     file_moves: list[FileMove] = []
     for fc in sorted_clusters:
         pkg_name = community_to_pkg[fc.id]
         for src in sorted(fc.files):
-            dest = f"{pkg_name}/{Path(src).name}"
+            dest = f"{pkg_name}/{file_to_mod[src]}"
             if src == dest:
                 continue
             file_moves.append(
@@ -377,9 +394,10 @@ def plan(view: GraphView, repo_root: Path, graph_json_path: Path | None = None) 
                 view,
                 G,
                 repo_root,
+                file_to_mod,
             )
         else:
-            dest_file = f"{dest_cluster}/{Path(m.host_file).name}"
+            dest_file = f"{dest_cluster}/{file_to_mod.get(m.host_file, 'mod_001.py')}"
         symbol_moves.append(
             SymbolMove(
                 symbol_id=m.symbol_id,

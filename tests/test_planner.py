@@ -238,33 +238,90 @@ def test_symbol_moves_no_unsorted_dest_file(refactor_plan):
 
 
 def test_read_first_line_dest_file(refactor_plan):
-    """A3: read_first_line() should land in pkg_003/reader.py (community 2 has only reader.py)."""
+    """A3/F1: read_first_line() should land in pkg_003/mod_001.py.
+
+    Community 2 has only reader.py → it is the only file → mod_001.py.
+    """
     sm = next(
         (s for s in refactor_plan.symbol_moves if "read_first_line" in s.label), None
     )
     assert sm is not None, "read_first_line() not found in symbol_moves"
-    assert sm.dest_file == "pkg_003/reader.py", (
-        f"Expected dest_file='pkg_003/reader.py', got {sm.dest_file!r}"
+    assert sm.dest_file == "pkg_003/mod_001.py", (
+        f"Expected dest_file='pkg_003/mod_001.py', got {sm.dest_file!r}"
     )
 
 
 def test_vec_from_pair_dest_file(refactor_plan):
-    """A3: vec_from_pair() should land in pkg_004/vec.py (community 3 has only vec.py)."""
+    """A3/F1: vec_from_pair() should land in pkg_004/mod_001.py.
+
+    Community 3 has only vec.py → it is the only file → mod_001.py.
+    """
     sm = next(
         (s for s in refactor_plan.symbol_moves if "vec_from_pair" in s.label), None
     )
     assert sm is not None, "vec_from_pair() not found in symbol_moves"
-    assert sm.dest_file == "pkg_004/vec.py", (
-        f"Expected dest_file='pkg_004/vec.py', got {sm.dest_file!r}"
+    assert sm.dest_file == "pkg_004/mod_001.py", (
+        f"Expected dest_file='pkg_004/mod_001.py', got {sm.dest_file!r}"
     )
 
 
 def test_distance_dest_file(refactor_plan):
-    """A3: distance() should land in pkg_004/vec.py (community 3 has only vec.py)."""
+    """A3/F1: distance() should land in pkg_004/mod_001.py.
+
+    Community 3 has only vec.py → it is the only file → mod_001.py.
+    """
     sm = next(
         (s for s in refactor_plan.symbol_moves if "distance" in s.label), None
     )
     assert sm is not None, "distance() not found in symbol_moves"
-    assert sm.dest_file == "pkg_004/vec.py", (
-        f"Expected dest_file='pkg_004/vec.py', got {sm.dest_file!r}"
+    assert sm.dest_file == "pkg_004/mod_001.py", (
+        f"Expected dest_file='pkg_004/mod_001.py', got {sm.dest_file!r}"
     )
+
+
+# ---------------------------------------------------------------------------
+# F1 — Placeholder filename invariants
+# ---------------------------------------------------------------------------
+
+
+import re as _re
+
+
+def test_dest_paths_use_placeholder_names(refactor_plan):
+    """F1: Every file_move dest and symbol_move dest_file must match pkg_NNN/mod_MMM.py."""
+    pattern = _re.compile(r"^pkg_\d{3}/mod_\d{3}\.py$")
+    for fm in refactor_plan.file_moves:
+        assert pattern.match(fm.dest), (
+            f"FileMove dest {fm.dest!r} does not match pkg_NNN/mod_MMM.py pattern"
+        )
+    for sm in refactor_plan.symbol_moves:
+        assert pattern.match(sm.dest_file), (
+            f"SymbolMove dest_file {sm.dest_file!r} does not match pkg_NNN/mod_MMM.py pattern"
+        )
+
+
+def test_no_dest_inherits_source_filename(refactor_plan):
+    """F1: No dest path should have the same basename as its source path."""
+    for fm in refactor_plan.file_moves:
+        assert Path(fm.dest).name != Path(fm.src).name, (
+            f"FileMove dest {fm.dest!r} inherits source filename from {fm.src!r}"
+        )
+    for sm in refactor_plan.symbol_moves:
+        assert Path(sm.dest_file).name != Path(sm.src_file).name, (
+            f"SymbolMove dest_file {sm.dest_file!r} inherits source filename "
+            f"from {sm.src_file!r}"
+        )
+
+
+def test_mod_allocation_deterministic(view):
+    """F1: Calling plan() twice must produce identical dest/dest_file strings."""
+    plan_a = plan(view, FIXTURE_REPO, FIXTURE_GRAPH)
+    plan_b = plan(view, FIXTURE_REPO, FIXTURE_GRAPH)
+
+    a_file_dests = [fm.dest for fm in plan_a.file_moves]
+    b_file_dests = [fm.dest for fm in plan_b.file_moves]
+    assert a_file_dests == b_file_dests, "file_move dest strings differ between runs"
+
+    a_sym_dests = [sm.dest_file for sm in plan_a.symbol_moves]
+    b_sym_dests = [sm.dest_file for sm in plan_b.symbol_moves]
+    assert a_sym_dests == b_sym_dests, "symbol_move dest_file strings differ between runs"

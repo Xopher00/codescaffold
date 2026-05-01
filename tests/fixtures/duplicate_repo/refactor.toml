@@ -1,0 +1,5 @@
+[validate]
+commands = [
+  "python -m compileall dup_pkg",
+]
+fail_fast = true

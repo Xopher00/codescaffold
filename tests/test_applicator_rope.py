@@ -21,6 +21,9 @@ from refactor_plan.applicator.rope_runner import (
     ApplyResult,
     apply_plan,
     rollback,
+    _is_residue,
+    _ensure_future_annotations,
+    _rewrite_cross_cluster_imports,
 )
 
 FIXTURE_GRAPH = (
@@ -178,20 +181,38 @@ def test_applied_count(repo_copy, refactor_plan):
     file_move_count = len([a for a in result.applied if a.kind == "file_move"])
     symbol_move_count = len([a for a in result.applied if a.kind == "symbol_move"])
     organize_count = len([a for a in result.applied if a.kind == "organize_imports"])
+    stray_delete_count = len([a for a in result.applied if a.kind == "stray_delete"])
+    import_rewrite_count = len([a for a in result.applied if a.kind == "import_rewrite"])
 
-    assert file_move_count + symbol_move_count + organize_count == len(result.applied)
+    # All action kinds should sum to total applied (F5 adds import_rewrite)
+    assert (
+        file_move_count + symbol_move_count + organize_count
+        + stray_delete_count + import_rewrite_count
+        == len(result.applied)
+    )
 
     # With only_approved_symbols=True and all approved=False, no symbol moves
     assert symbol_move_count == 0
 
-    # File moves should match number of successful plan file_moves
+    # F1: each non-__init__.py file move emits 2 applied actions (MoveModule + Rename),
+    # while __init__.py emits 1 (pathlib copy). So file_move_count >= plan.file_moves
+    # and at most 2× the plan count.
     expected_file_moves = len(refactor_plan.file_moves)
-    assert file_move_count == expected_file_moves, (
-        f"Expected {expected_file_moves} file moves, got {file_move_count}; "
+    assert file_move_count >= expected_file_moves, (
+        f"Expected at least {expected_file_moves} file move actions, got {file_move_count}; "
         f"escalations: {result.escalations}"
     )
+    assert file_move_count <= expected_file_moves * 2, (
+        f"Expected at most {expected_file_moves * 2} file move actions "
+        f"(2 per file: move + rename), got {file_move_count}"
+    )
 
-    # Total applied actions = file moves + 0 symbol moves + organize passes
+    # F4: stray_delete actions should be present (source __init__ and/or top-level __init__)
+    assert stray_delete_count >= 1, (
+        f"Expected at least 1 stray_delete action (F4), got {stray_delete_count}"
+    )
+
+    # Total applied actions = file moves + 0 symbol moves + organize passes + stray deletes
     total = len(result.applied)
     assert total >= file_move_count
 
@@ -294,9 +315,10 @@ def test_a7_two_symbols_same_dest_both_present(tmp_path):
 
 
 def test_approved_symbols_land_in_dest_file(repo_copy, refactor_plan):
-    """A3+A7: After applying approved symbol moves, each symbol lands in dest_file.
+    """A3+A7/F1: After applying approved symbol moves, each symbol lands in dest_file.
 
-    Approves vec_from_pair and distance, both targeting pkg_004/vec.py.
+    Approves vec_from_pair and distance, both targeting pkg_004/mod_001.py
+    (community 3 has only vec.py → mod_001.py under F1 placeholder naming).
     Both must appear in that file — confirming A7 (no silent drop of first move).
     """
     vec_from_pair = next(
@@ -320,15 +342,15 @@ def test_approved_symbols_land_in_dest_file(repo_copy, refactor_plan):
             f"Expected at least 2 symbol_move actions; escalations: {result.escalations}"
         )
 
-        # Both symbols target pkg_004/vec.py — verify both are present
-        vec_dest = repo_copy / "pkg_004" / "vec.py"
+        # Both symbols target pkg_004/mod_001.py (F1 placeholder name for vec.py)
+        vec_dest = repo_copy / vec_from_pair.dest_file
         assert vec_dest.exists(), f"Expected {vec_dest} to exist"
         content = vec_dest.read_text()
         assert "def vec_from_pair" in content, (
-            f"vec_from_pair missing from pkg_004/vec.py:\n{content}"
+            f"vec_from_pair missing from {vec_from_pair.dest_file}:\n{content}"
         )
         assert "def distance" in content, (
-            f"distance missing from pkg_004/vec.py:\n{content}"
+            f"distance missing from {vec_from_pair.dest_file}:\n{content}"
         )
     finally:
         vec_from_pair.approved = False
@@ -358,3 +380,483 @@ def test_no_stray_init_files_after_apply(repo_copy, refactor_plan):
         assert not nested_dir.exists(), (
             f"Stray nested messy_pkg/ dir found under {pkg_dir} (A4 bug not fixed)"
         )
+
+
+# ---------------------------------------------------------------------------
+# F2 — Residue cleanup: files with only docstring/imports should be deleted
+# ---------------------------------------------------------------------------
+
+
+def test_residue_files_deleted_after_apply(repo_copy, refactor_plan):
+    """F2: After symbol moves, residue files (only docstring + imports) are deleted.
+
+    god.py moves to pkg_001/mod_003.py. Both vec_from_pair() and read_first_line()
+    move out of it, leaving only the docstring + imports. After organize_imports,
+    this file should be detected as residue and deleted.
+    """
+    # Approve all symbol moves to ensure god.py becomes empty
+    for sm in refactor_plan.symbol_moves:
+        sm.approved = True
+
+    try:
+        result = apply_plan(refactor_plan, repo_copy, only_approved_symbols=True)
+
+        # god.py was moved to pkg_001/mod_003.py
+        god_dest = repo_copy / "pkg_001" / "mod_003.py"
+
+        # After cleanup, the residue should be deleted
+        assert not god_dest.exists(), (
+            f"Expected residue {god_dest} to be deleted, but it still exists"
+        )
+
+        # Verify at least one residue_delete action was applied
+        residue_actions = [a for a in result.applied if a.kind == "residue_delete"]
+        assert len(residue_actions) >= 1, (
+            f"Expected at least 1 residue_delete action, got {len(residue_actions)}"
+        )
+    finally:
+        # Reset approved flags
+        for sm in refactor_plan.symbol_moves:
+            sm.approved = False
+
+
+def test_residue_action_in_applied_list(repo_copy, refactor_plan):
+    """F2: Residue deletions are recorded as AppliedAction with kind='residue_delete'."""
+    # Approve all symbol moves
+    for sm in refactor_plan.symbol_moves:
+        sm.approved = True
+
+    try:
+        result = apply_plan(refactor_plan, repo_copy, only_approved_symbols=True)
+
+        # Find residue_delete actions
+        residue_actions = [a for a in result.applied if a.kind == "residue_delete"]
+        assert len(residue_actions) >= 1, (
+            f"Expected at least 1 residue_delete action in applied list"
+        )
+
+        # Each residue_delete action should have a descriptive message
+        for action in residue_actions:
+            assert "residue" in action.description.lower(), (
+                f"Expected 'residue' in description: {action.description}"
+            )
+            # history_index should be -1 (sentinel for non-rope actions)
+            assert action.history_index == -1, (
+                f"Expected history_index=-1 for residue_delete, got {action.history_index}"
+            )
+    finally:
+        # Reset approved flags
+        for sm in refactor_plan.symbol_moves:
+            sm.approved = False
+
+
+def test_non_residue_files_kept(repo_copy, refactor_plan):
+    """F2: Non-residue files (with actual content) are kept even if they host symbol moves.
+
+    vec.py moves to pkg_004/mod_001.py and hosts several symbols (Vec class, etc.).
+    Even though symbols move out of it (or into it), it's not a residue (has the Vec class).
+    This file must still exist after apply.
+    """
+    # Approve all symbol moves
+    for sm in refactor_plan.symbol_moves:
+        sm.approved = True
+
+    try:
+        result = apply_plan(refactor_plan, repo_copy, only_approved_symbols=True)
+
+        # vec.py moves to pkg_004/mod_001.py
+        vec_dest = repo_copy / "pkg_004" / "mod_001.py"
+        assert vec_dest.exists(), (
+            f"Expected non-residue {vec_dest} to still exist after apply"
+        )
+
+        # mat.py moves to pkg_002/mod_002.py and contains Mat class
+        mat_dest = repo_copy / "pkg_002" / "mod_002.py"
+        assert mat_dest.exists(), (
+            f"Expected non-residue {mat_dest} to still exist after apply"
+        )
+
+        # Verify that not all files were deleted (only residues)
+        residue_actions = [a for a in result.applied if a.kind == "residue_delete"]
+        file_move_count = len([a for a in result.applied if a.kind == "file_move"])
+        assert file_move_count > len(residue_actions), (
+            f"Expected fewer residue deletes than total file moves"
+        )
+    finally:
+        # Reset approved flags
+        for sm in refactor_plan.symbol_moves:
+            sm.approved = False
+
+
+# ---------------------------------------------------------------------------
+# _is_residue unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_is_residue_docstring_only(tmp_path):
+    """_is_residue: file with only docstring → True."""
+    code = '"""Module docstring."""\n'
+    path = tmp_path / "residue1.py"
+    path.write_text(code)
+    assert _is_residue(path) is True
+
+
+def test_is_residue_docstring_with_future_and_all(tmp_path):
+    """_is_residue: docstring + __future__ + __all__ → True."""
+    code = '''"""Module docstring."""
+from __future__ import annotations
+
+__all__ = ["some_export"]
+'''
+    path = tmp_path / "residue2.py"
+    path.write_text(code)
+    assert _is_residue(path) is True
+
+
+def test_is_residue_with_function_def(tmp_path):
+    """_is_residue: file with function def → False."""
+    code = '''"""Module docstring."""
+
+def foo():
+    return 42
+'''
+    path = tmp_path / "not_residue1.py"
+    path.write_text(code)
+    assert _is_residue(path) is False
+
+
+def test_is_residue_with_class_def(tmp_path):
+    """_is_residue: file with class def → False."""
+    code = '''"""Module docstring."""
+
+class Bar:
+    pass
+'''
+    path = tmp_path / "not_residue2.py"
+    path.write_text(code)
+    assert _is_residue(path) is False
+
+
+# ---------------------------------------------------------------------------
+# F3 — _ensure_future_annotations unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_ensure_future_annotations_adds_to_empty_file(tmp_path):
+    """F3: _ensure_future_annotations adds import to file with only class def."""
+    code = '''class Vec:
+    """2D vector."""
+    def __init__(self, x: float, y: float):
+        self.x = x
+        self.y = y
+'''
+    path = tmp_path / "test_module.py"
+    path.write_text(code)
+
+    result = _ensure_future_annotations(path)
+    assert result is True, "Expected file to be modified"
+
+    modified = path.read_text()
+    assert "from __future__ import annotations" in modified, (
+        f"Expected future annotations import in modified file:\n{modified}"
+    )
+    # Import should be first line
+    lines = modified.split("\n")
+    assert "from __future__ import annotations" in lines[0], (
+        f"Expected future import as first line, got: {lines[0]}"
+    )
+
+
+def test_ensure_future_annotations_after_docstring(tmp_path):
+    """F3: _ensure_future_annotations places import after module docstring."""
+    code = '''"""Module docstring."""
+
+class Vec:
+    """2D vector."""
+    pass
+'''
+    path = tmp_path / "test_with_doc.py"
+    path.write_text(code)
+
+    result = _ensure_future_annotations(path)
+    assert result is True, "Expected file to be modified"
+
+    modified = path.read_text()
+    lines = modified.split("\n")
+    # Line 0 should still be the docstring
+    assert '"""Module docstring."""' in lines[0], (
+        f"Expected docstring as first line, got: {lines[0]}"
+    )
+    # Line 1 or 2 should be the future import (possibly blank line in between)
+    import_found_idx = None
+    for i in range(1, min(4, len(lines))):
+        if "from __future__ import annotations" in lines[i]:
+            import_found_idx = i
+            break
+    assert import_found_idx is not None, (
+        f"Expected future import after docstring, got:\n{modified}"
+    )
+
+
+def test_ensure_future_annotations_idempotent(tmp_path):
+    """F3: _ensure_future_annotations is idempotent (no-op if already present)."""
+    code = '''from __future__ import annotations
+
+class Vec:
+    """2D vector."""
+    pass
+'''
+    path = tmp_path / "already_has_import.py"
+    path.write_text(code)
+
+    result = _ensure_future_annotations(path)
+    assert result is False, "Expected no modification when import already present"
+
+    # Verify content unchanged
+    assert path.read_text() == code, "Expected file to be unchanged"
+
+
+def test_ensure_future_annotations_other_future_import(tmp_path):
+    """F3: _ensure_future_annotations adds annotations import if only other __future__ imports exist."""
+    code = '''from __future__ import division
+
+class Vec:
+    def __init__(self, x: float, y: float):
+        self.x = x / 1.0
+'''
+    path = tmp_path / "other_future.py"
+    path.write_text(code)
+
+    result = _ensure_future_annotations(path)
+    assert result is True, "Expected file to be modified"
+
+    modified = path.read_text()
+    assert "from __future__ import annotations" in modified, (
+        f"Expected annotations import added, got:\n{modified}"
+    )
+    # Should have both division and annotations imports (either on same line or separate)
+    assert "division" in modified and "annotations" in modified, (
+        f"Expected both division and annotations, got:\n{modified}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# F3 — Integration: destination files are importable after apply
+# ---------------------------------------------------------------------------
+
+
+def test_destination_files_importable_after_apply(repo_copy, refactor_plan):
+    """F3 integration: After apply, moved symbols are importable without NameError.
+
+    This is the regression test for the forward-ref NameError: moved symbols
+    whose type annotations reference classes defined later should not fail
+    on import thanks to `from __future__ import annotations`.
+    """
+    import subprocess
+    import sys
+
+    # Approve all symbol moves
+    for sm in refactor_plan.symbol_moves:
+        sm.approved = True
+
+    try:
+        result = apply_plan(refactor_plan, repo_copy, only_approved_symbols=True)
+
+        # Verify at least some symbol moves were applied
+        symbol_actions = [a for a in result.applied if a.kind == "symbol_move"]
+        assert len(symbol_actions) >= 1, (
+            f"Expected at least 1 symbol_move action; got {len(symbol_actions)}"
+        )
+
+        # For each unique dest_file with symbol moves, verify the module is importable
+        unique_dests = set(sm.dest_file for sm in refactor_plan.symbol_moves if sm.approved)
+        for dest_file in unique_dests:
+            # Convert dest_file (e.g., "pkg_004/mod_001.py") to import form
+            dest_path = Path(dest_file)
+            pkg_name = dest_path.parent.name
+            mod_name = dest_path.stem
+
+            # Run python -c "import pkg_NNN.mod_MMM" in the repo_copy
+            cmd = [sys.executable, "-c", f"import {pkg_name}.{mod_name}"]
+            result_proc = subprocess.run(
+                cmd,
+                cwd=repo_copy,
+                capture_output=True,
+                text=True,
+            )
+
+            assert result_proc.returncode == 0, (
+                f"Failed to import {pkg_name}.{mod_name} after apply; stderr:\n{result_proc.stderr}"
+            )
+    finally:
+        # Reset approved flags
+        for sm in refactor_plan.symbol_moves:
+            sm.approved = False
+
+
+# ---------------------------------------------------------------------------
+# F4 — Stray __init__.py cleanup
+# ---------------------------------------------------------------------------
+
+
+def test_no_top_level_init_after_apply(repo_copy, refactor_plan):
+    """F4: After apply, there must be no stray top-level __init__.py at repo root.
+
+    A top-level __init__.py at the repo root is never legitimate for a Python
+    package. If rope's MoveModule or other operations create one, it must be deleted.
+    """
+    apply_plan(refactor_plan, repo_copy, only_approved_symbols=True)
+
+    top_init = repo_copy / "__init__.py"
+    assert not top_init.exists(), (
+        f"Stray top-level __init__.py found at {top_init} "
+        "(F4 bug: top-level __init__.py should have been deleted)"
+    )
+
+
+def test_no_source_messy_pkg_init_after_apply(repo_copy, refactor_plan):
+    """F4: After apply, source messy_pkg/__init__.py must be deleted.
+
+    The pathlib-copy fix for __init__.py (option a, A4) copies the content to
+    the placeholder dest but must also delete the source __init__.py.
+    """
+    apply_plan(refactor_plan, repo_copy, only_approved_symbols=True)
+
+    source_init = repo_copy / "messy_pkg" / "__init__.py"
+    assert not source_init.exists(), (
+        f"Stray source __init__.py found at {source_init} "
+        "(F4 bug: source __init__.py should have been unlinked after copy)"
+    )
+
+
+def test_stray_delete_actions_recorded(repo_copy, refactor_plan):
+    """F4: Stray __init__.py deletions are recorded as AppliedAction with kind='stray_delete'."""
+    result = apply_plan(refactor_plan, repo_copy, only_approved_symbols=True)
+
+    # Should have at least one stray_delete action (top-level or source package init)
+    stray_actions = [a for a in result.applied if a.kind == "stray_delete"]
+    assert len(stray_actions) >= 1, (
+        f"Expected at least 1 stray_delete action in applied list, got {len(stray_actions)}"
+    )
+
+    # Each stray_delete action should have a descriptive message
+    for action in stray_actions:
+        assert "init" in action.description.lower(), (
+            f"Expected 'init' in description for stray_delete: {action.description}"
+        )
+        # history_index should be -1 (sentinel for non-rope actions)
+        assert action.history_index == -1, (
+            f"Expected history_index=-1 for stray_delete, got {action.history_index}"
+        )
+
+
+# ---------------------------------------------------------------------------
+# F5 — Cross-cluster import rewrite post-pass
+# ---------------------------------------------------------------------------
+
+
+def test_cross_cluster_imports_rewritten_to_absolute(repo_copy, refactor_plan):
+    """F5: After apply, cross-cluster relative imports are rewritten to absolute.
+
+    pkg_003/mod_001.py (was reader.py) imports Vec and distance from sibling
+    modules that ended up in different placeholder packages.  Both must be
+    rewritten to absolute imports pointing at their new locations.
+    """
+    # Approve all symbol moves so distance() ends up in pkg_004/mod_001.py
+    for sm in refactor_plan.symbol_moves:
+        sm.approved = True
+
+    try:
+        apply_plan(refactor_plan, repo_copy, only_approved_symbols=True)
+
+        reader_dest = repo_copy / "pkg_003" / "mod_001.py"
+        assert reader_dest.exists(), f"Expected {reader_dest} to exist"
+        content = reader_dest.read_text()
+
+        # The broken relative import must be gone
+        assert "from .vec" not in content, (
+            f"Expected 'from .vec' to be rewritten; pkg_003/mod_001.py:\n{content}"
+        )
+        assert "from .geom" not in content, (
+            f"Expected 'from .geom' to be rewritten; pkg_003/mod_001.py:\n{content}"
+        )
+
+        # Vec lives in pkg_004/mod_001.py — absolute import expected
+        assert "from pkg_004.mod_001 import" in content and "Vec" in content, (
+            f"Expected absolute import of Vec from pkg_004.mod_001; content:\n{content}"
+        )
+    finally:
+        for sm in refactor_plan.symbol_moves:
+            sm.approved = False
+
+
+def test_intra_cluster_relative_imports_preserved(repo_copy, refactor_plan):
+    """F5: Intra-cluster relative imports (e.g. from .mod_002 import Mat) are kept.
+
+    pkg_002/mod_001.py (was geom.py) imports Mat from mat.py which also moved
+    into pkg_002 as mod_002.py.  That relative import is valid and must be kept.
+    """
+    for sm in refactor_plan.symbol_moves:
+        sm.approved = True
+
+    try:
+        apply_plan(refactor_plan, repo_copy, only_approved_symbols=True)
+
+        geom_dest = repo_copy / "pkg_002" / "mod_001.py"
+        assert geom_dest.exists(), f"Expected {geom_dest} to exist"
+        content = geom_dest.read_text()
+
+        # Mat is in the same cluster (pkg_002/mod_002.py) — relative import preserved
+        assert "from .mod_002 import Mat" in content, (
+            f"Expected intra-cluster relative import 'from .mod_002 import Mat' "
+            f"to be preserved; pkg_002/mod_001.py:\n{content}"
+        )
+    finally:
+        for sm in refactor_plan.symbol_moves:
+            sm.approved = False
+
+
+def test_rewrite_cross_cluster_imports_idempotent(tmp_path):
+    """F5 unit: _rewrite_cross_cluster_imports is idempotent — second call returns False.
+
+    Build a synthetic dest file and src_to_dest map; call the helper twice;
+    verify the second call returns False (no changes).
+    """
+    # Create a fake package structure
+    pkg_a = tmp_path / "pkg_a"
+    pkg_b = tmp_path / "pkg_b"
+    pkg_a.mkdir()
+    pkg_b.mkdir()
+    (pkg_a / "__init__.py").touch()
+    (pkg_b / "__init__.py").touch()
+
+    # pkg_a/mod_001.py: formerly "old_pkg/foo.py", imports from "old_pkg/bar.py"
+    # which is now "pkg_b/mod_001.py"
+    dest_file = pkg_a / "mod_001.py"
+    dest_file.write_text(
+        '"""Module a."""\nfrom __future__ import annotations\n\nfrom .bar import something\n',
+        encoding="utf-8",
+    )
+
+    src_to_dest = {
+        "old_pkg/foo.py": "pkg_a/mod_001.py",
+        "old_pkg/bar.py": "pkg_b/mod_001.py",
+    }
+
+    # First call: should rewrite `from .bar import something` → absolute
+    changed_first = _rewrite_cross_cluster_imports(dest_file, tmp_path, src_to_dest)
+    assert changed_first is True, "Expected first call to modify the file"
+
+    content_after_first = dest_file.read_text()
+    assert "from .bar" not in content_after_first, (
+        f"Expected relative import to be rewritten; content:\n{content_after_first}"
+    )
+    assert "pkg_b" in content_after_first, (
+        f"Expected absolute import with pkg_b; content:\n{content_after_first}"
+    )
+
+    # Second call: file is already correct — no changes expected
+    changed_second = _rewrite_cross_cluster_imports(dest_file, tmp_path, src_to_dest)
+    assert changed_second is False, (
+        f"Expected second call to be a no-op; content after second call:\n{dest_file.read_text()}"
+    )
