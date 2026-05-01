@@ -1,0 +1,32 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "refactor-plan"
+version = "0.1.0"
+description = "Graph-driven structural refactoring assistant"
+requires-python = ">=3.11"
+dependencies = [
+  "networkx>=3.0",
+  "typer>=0.9",
+  "pydantic>=2.0",
+  "rope>=1.13",
+  "libcst>=1.0",
+  "import-linter>=2.0",
+  "grimp>=3.0",
+  "anthropic>=0.30",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0", "ruff>=0.6"]
+
+[project.scripts]
+refactor-plan = "refactor_plan.cli:app"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pyright]
+exclude = ["tests/fixtures/**"]
+

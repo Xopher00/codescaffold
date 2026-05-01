@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.refactor_plan/
+!tests/fixtures/messy_repo/.refactor_plan/
+graphify-out/
+*.egg-info/
+build/
+dist/
+.pytest_cache/
+.ruff_cache/
