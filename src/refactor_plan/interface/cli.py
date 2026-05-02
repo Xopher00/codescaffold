@@ -44,23 +44,26 @@ def analyze(
     view = build_view(graph_path)
     refactor_plan = build_plan(view, repo, graph_path)
 
-    out = _out_dir(repo)
-    out.mkdir(parents=True, exist_ok=True)
-    write_plan(refactor_plan, _plan_path(repo))
-
     plan_dict = {
         "file_moves": [m.model_dump() for m in refactor_plan.file_moves],
         "symbol_moves": [m.model_dump() for m in refactor_plan.symbol_moves],
         "communities": [c.model_dump() for c in refactor_plan.clusters],
     }
     report_text = render_dry_run_report(plan_dict, str(repo))
-    report_path = write_report(report_text, out / "STRUCTURE_REPORT.md")
 
+    typer.echo(f"  {len(refactor_plan.file_moves)} file move(s), {len(refactor_plan.symbol_moves)} symbol move(s) proposed")
+
+    if dry_run:
+        typer.echo(report_text)
+        typer.echo("Dry-run: plan not written. Pass --no-dry-run to save.")
+        return
+
+    out = _out_dir(repo)
+    out.mkdir(parents=True, exist_ok=True)
+    write_plan(refactor_plan, _plan_path(repo))
+    report_path = write_report(report_text, out / "STRUCTURE_REPORT.md")
     typer.echo(f"Plan:   {_plan_path(repo)}")
     typer.echo(f"Report: {report_path}")
-    typer.echo(f"  {len(refactor_plan.file_moves)} file move(s), {len(refactor_plan.symbol_moves)} symbol move(s) proposed")
-    if dry_run:
-        typer.echo("Dry-run: no files changed. Pass --no-dry-run to apply.")
 
 
 @app.command()

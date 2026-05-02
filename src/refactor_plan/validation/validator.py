@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import shlex
 import subprocess
 from pathlib import Path
 
@@ -34,7 +35,7 @@ def validate(
 
     for cmd in cmds:
         proc = subprocess.run(
-            cmd.split(),
+            shlex.split(cmd),
             cwd=str(repo_root),
             capture_output=True,
             text=True,

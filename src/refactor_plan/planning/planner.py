@@ -37,9 +37,29 @@ class RefactorPlan(BaseModel):
     ]
 
 
+def _detect_source_root(repo_root: Path, source_files: list[str]) -> Path:
+    """Return the most likely source root for this repo.
+
+    Checks common layouts: src/, lib/, the repo root itself.
+    Falls back to repo_root if no layout is detected.
+    """
+    candidates = [repo_root / "src", repo_root / "lib", repo_root]
+    for path in source_files[:10]:
+        for candidate in candidates:
+            try:
+                Path(path).relative_to(candidate)
+                return candidate
+            except ValueError:
+                continue
+    return repo_root
+
+
 def plan(view: ClusterView, repo_root: Path, graph_json: Path) -> RefactorPlan:
     clusters: list[ClusterInfo] = []
     file_moves: list[FileMoveProposal] = []
+
+    all_files = [sf for files in view.file_communities.values() for sf in files]
+    src_root = _detect_source_root(repo_root, all_files)
 
     for comm_id, source_files in sorted(view.file_communities.items()):
         parents = [Path(sf).parent for sf in source_files]
@@ -54,7 +74,7 @@ def plan(view: ClusterView, repo_root: Path, graph_json: Path) -> RefactorPlan:
             ))
             continue
 
-        target_dir = repo_root / "src" / f"pkg_{comm_id:03d}"
+        target_dir = src_root / f"pkg_{comm_id:03d}"
         clusters.append(ClusterInfo(
             community_id=comm_id,
             source_files=source_files,
