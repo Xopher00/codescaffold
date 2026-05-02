@@ -59,4 +59,3 @@ class ApplyResult(BaseModel):
     skipped: list[Escalation] = []
     failed: list[Escalation] = []
     blocked: list[Escalation] = []
-    rope_undo_count: int = 0
