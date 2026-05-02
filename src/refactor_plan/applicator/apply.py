@@ -94,6 +94,12 @@ def apply_plan(
                     rewrite_cross_cluster_imports(py_file, move_records)
                 except Exception as exc:
                     logger.warning("import rewrite failed for %s: %s", py_file, exc)
+                    result.skipped.append(Escalation(
+                        kind=MoveKind.FILE,
+                        source=str(py_file),
+                        reason=str(exc),
+                        category="import_rewrite",
+                    ))
 
     finally:
         project.close()

@@ -37,14 +37,23 @@ class RefactorPlan(BaseModel):
     ]
 
 
+_TEST_PARTS = {"tests", "test", "fixtures", "fixture", "conftest"}
+
+
 def _detect_source_root(repo_root: Path, source_files: list[str]) -> Path:
     """Return the most likely source root for this repo.
 
     Checks common layouts: src/, lib/, the repo root itself.
+    Skips test/fixture paths before sampling to avoid misdetection.
     Falls back to repo_root if no layout is detected.
     """
     candidates = [repo_root / "src", repo_root / "lib", repo_root]
-    for path in source_files[:10]:
+    filtered = [
+        sf for sf in source_files
+        if not _TEST_PARTS.intersection(Path(sf).parts)
+    ]
+    sample = (filtered or source_files)[:20]
+    for path in sample:
         for candidate in candidates:
             try:
                 Path(path).relative_to(candidate)
@@ -66,7 +75,7 @@ def plan(view: ClusterView, repo_root: Path, graph_json: Path) -> RefactorPlan:
         parent_counts = Counter(parents)
         _, majority_count = parent_counts.most_common(1)[0]
 
-        if majority_count == len(source_files):
+        if majority_count == len(source_files) and len(source_files) > 1:
             clusters.append(ClusterInfo(
                 community_id=comm_id,
                 source_files=source_files,

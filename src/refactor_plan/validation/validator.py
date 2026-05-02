@@ -33,6 +33,7 @@ def validate(
     cmds = commands if commands is not None else _DEFAULT_COMMANDS
     results: list[CommandResult] = []
 
+    all_passed = True
     for cmd in cmds:
         proc = subprocess.run(
             shlex.split(cmd),
@@ -47,6 +48,6 @@ def validate(
             stderr=proc.stderr,
         ))
         if proc.returncode != 0:
-            return ValidationReport(passed=False, commands=results)
+            all_passed = False
 
-    return ValidationReport(passed=True, commands=results)
+    return ValidationReport(passed=all_passed, commands=results)
