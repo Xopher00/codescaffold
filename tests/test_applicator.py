@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import subprocess
 from pathlib import Path
 
@@ -13,6 +14,7 @@ from refactor_plan.applicator.import_rewrites import MoveRecord, rewrite_cross_c
 from refactor_plan.applicator.manifests import read_manifest, read_stray_manifest, write_manifest, write_stray_manifest
 from refactor_plan.applicator.models import AppliedAction, ApplyResult, Escalation, MoveKind, MoveStrategy
 from refactor_plan.applicator.rollback import rollback
+from refactor_plan.applicator.symbol_moves import _organize_imports
 from refactor_plan.applicator.symbol_moves import apply_symbol_move
 
 
@@ -297,6 +299,71 @@ def test_rollback_no_snapshot_skips_gracefully(tmp_path: Path) -> None:
     # Must not raise AssertionError
     actions = rollback(tmp_path, tmp_path)
     assert isinstance(actions, list)
+
+
+# ---------------------------------------------------------------------------
+# rollback — empty-dict snapshot and rope-failure summary
+# ---------------------------------------------------------------------------
+
+def test_rollback_empty_dict_snapshot_skips_gracefully(tmp_path: Path) -> None:
+    """original_content={} (empty, not None) must not restore any files and not raise."""
+    result = ApplyResult(applied=[
+        AppliedAction(
+            kind=MoveKind.SYMBOL,
+            source=str(tmp_path / "src.py"),
+            dest=str(tmp_path / "dest.py"),
+            symbol="foo",
+            strategy=MoveStrategy.LIBCST,
+            original_content={},  # empty dict — previously silently dropped before assert
+        )
+    ])
+    write_manifest(result, tmp_path)
+    actions = rollback(tmp_path, tmp_path)
+    assert isinstance(actions, list)
+    assert not any("libcst restore:" in a for a in actions)
+
+
+def test_rollback_rope_failure_reports_remaining(tmp_path: Path) -> None:
+    """When rope undo fails, the message must note how many actions were not attempted."""
+    result = ApplyResult(applied=[
+        AppliedAction(kind=MoveKind.FILE, source=f"/src/a{i}.py", dest=f"/dest/a{i}.py", strategy=MoveStrategy.ROPE)
+        for i in range(3)
+    ])
+    write_manifest(result, tmp_path)
+    actions = rollback(tmp_path, tmp_path)
+    failure_msgs = [a for a in actions if "rope undo failed" in a]
+    assert failure_msgs, "Expected at least one rope undo failure message"
+    # First failure (last applied action, reversed) should report remaining count
+    assert any("not attempted" in a for a in failure_msgs)
+
+
+# ---------------------------------------------------------------------------
+# warning coverage — silent failures are observable
+# ---------------------------------------------------------------------------
+
+def test_organize_imports_warning_on_out_of_project_file(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """_organize_imports must log a warning when the file is outside the project root."""
+    outside = Path("/tmp/not_in_project.py")
+    with caplog.at_level(logging.WARNING, logger="refactor_plan.applicator.symbol_moves"):
+        _organize_imports(outside, tmp_path)
+    assert any("import organization failed" in r.message for r in caplog.records)
+
+
+def test_apply_plan_warns_on_import_rewrite_failure(messy_repo: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """apply_plan must emit a warning (not silently swallow) when import rewrite fails on a broken file."""
+    broken = messy_repo / "src" / "messy_pkg" / "broken.py"
+    broken.write_text("this is @@@@ not valid python\n")
+
+    src = messy_repo / "src" / "messy_pkg" / "utils.py"
+    dest = messy_repo / "src" / "messy_pkg" / "extracted.py"
+    plan = {
+        "file_moves": [],
+        "symbol_moves": [{"source": str(src), "dest": str(dest), "symbol": "helper"}],
+    }
+    out_dir = messy_repo / ".refactor_plan"
+    with caplog.at_level(logging.WARNING, logger="refactor_plan.applicator.apply"):
+        apply_plan(plan, messy_repo, out_dir, dry_run=False)
+    assert any("import rewrite failed" in r.message for r in caplog.records)
 
 
 # ---------------------------------------------------------------------------
