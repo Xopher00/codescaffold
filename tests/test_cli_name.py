@@ -7,9 +7,9 @@ from types import SimpleNamespace
 import pytest
 from typer.testing import CliRunner
 
-import refactor_plan.cli as cli
+import refactor_plan.interface.cli as cli
 from refactor_plan.applicator.rope_runner import AppliedAction, ApplyResult
-from refactor_plan.namer import RenameEntry, RenameMap
+from refactor_plan.naming.namer import RenameEntry, RenameMap
 
 runner = CliRunner()
 

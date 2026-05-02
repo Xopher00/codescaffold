@@ -10,15 +10,15 @@ from unittest.mock import MagicMock, call
 
 import pytest
 
-from refactor_plan.cluster_view import build_view
-from refactor_plan.namer import (
+from refactor_plan.interface.cluster_view import build_view
+from refactor_plan.naming.namer import (
     RenameEntry,
     RenameMap,
     gather_context,
     name_clusters,
     write_rename_map,
 )
-from refactor_plan.planner import plan
+from refactor_plan.planning.planner import plan
 
 # ---------------------------------------------------------------------------
 # Fixture paths
@@ -174,7 +174,7 @@ def test_write_rename_map_round_trip(tmp_path):
 def test_empty_plan_returns_empty_rename_map(view):
     """When the mock returns an empty RenameMap, name_clusters must return it
     unchanged."""
-    from refactor_plan.planner import RefactorPlan
+    from refactor_plan.planning.planner import RefactorPlan
 
     empty_plan = RefactorPlan(
         clusters=[],

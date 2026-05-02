@@ -14,9 +14,9 @@ from pathlib import Path
 
 import pytest
 
-from refactor_plan.cluster_view import build_view
-from refactor_plan.graph_bridge import normalize_source_files
-from refactor_plan.planner import (
+from refactor_plan.interface.cluster_view import build_view
+from refactor_plan.interface.graph_bridge import normalize_source_files
+from refactor_plan.planning.planner import (
     RefactorPlan,
     plan,
     write_plan,

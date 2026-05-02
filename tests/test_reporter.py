@@ -4,10 +4,10 @@ from pathlib import Path
 
 import pytest
 
-from refactor_plan.cleaner import DeadCodeReport, DeadSymbol
-from refactor_plan.cluster_view import build_view
-from refactor_plan.planner import plan
-from refactor_plan.reporter import render_apply_report, render_dead_code_report_md, render_dry_run_report
+from refactor_plan.entropy.cleaner import DeadCodeReport, DeadSymbol
+from refactor_plan.interface.cluster_view import build_view
+from refactor_plan.planning.planner import plan
+from refactor_plan.reporting.reporter import render_apply_report, render_dead_code_report_md, render_dry_run_report
 
 FIXTURE_GRAPH = (
     Path(__file__).parent
@@ -430,7 +430,7 @@ def test_render_apply_report_contains_before_after_markers(refactor_plan, view, 
 
 def test_render_apply_report_before_after_with_differing_views(refactor_plan, view, tmp_path):
     """A6: When pre_view and post_view differ, both Before and After sections appear."""
-    from refactor_plan.cluster_view import GraphView
+    from refactor_plan.interface.cluster_view import GraphView
 
     # Build a synthetic post_view with different god_nodes
     post_view = GraphView(

@@ -26,18 +26,9 @@ from rope.base import libutils
 from rope.base.project import Project
 from rope.refactor.move import MoveGlobal, create_move
 
-from refactor_plan.applicator.rope_runner import (
-    AppliedAction,
-    ApplyResult,
-    Escalation,
-    _ensure_future_annotations,
-    _is_residue,
-    _pre_create_dest_module,
-    _preflight_file,
-    _rewrite_cross_cluster_imports,
-    _write_stray_deleted_manifest,
-)
-from refactor_plan.cluster_view import GraphView
+from refactor_plan.interface.cluster_view import GraphView
+from refactor_plan.applicator.rope_runner import AppliedAction, ApplyResult, Escalation, _is_residue, _pre_create_dest_module, _preflight_file, _rewrite_cross_cluster_imports, _write_stray_deleted_manifest
+
 
 log = logging.getLogger(__name__)
 

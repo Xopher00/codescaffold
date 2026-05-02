@@ -3,9 +3,9 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
-import refactor_plan.cli as cli
+import refactor_plan.interface.cli as cli
 from refactor_plan.applicator.rope_runner import AppliedAction, ApplyResult
-from refactor_plan.planner import RefactorPlan, SymbolMove
+from refactor_plan.planning.planner import RefactorPlan, SymbolMove
 from typer.testing import CliRunner
 
 runner = CliRunner()

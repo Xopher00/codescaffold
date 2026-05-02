@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from refactor_plan.applicator.rope_runner import Escalation
-from refactor_plan.validator import ValidationReport, validate
+from refactor_plan.validation.validator import ValidationReport, validate
 
 
 # ---------------------------------------------------------------------------
@@ -54,7 +54,7 @@ def test_all_passing_commands(tmp_path: Path) -> None:
 def test_failing_command_sets_passed_false(tmp_path: Path) -> None:
     """A failing command marks the report as not passed."""
     _write_toml(tmp_path, '[validate]\ncommands = ["false"]\n')
-    with patch("refactor_plan.validator.rollback"):
+    with patch("refactor_plan.validation.validator.rollback"):
         report = validate(tmp_path, applied_count=0, write_report=False)
     assert report.passed is False
     assert report.commands[0].exit_code != 0
@@ -66,7 +66,7 @@ def test_fail_fast_stops_on_first_failure(tmp_path: Path) -> None:
         tmp_path,
         '[validate]\nfail_fast = true\ncommands = ["false", "echo should-not-run"]\n',
     )
-    with patch("refactor_plan.validator.rollback"):
+    with patch("refactor_plan.validation.validator.rollback"):
         report = validate(tmp_path, applied_count=0, write_report=False)
     assert report.passed is False
     assert len(report.commands) == 1
@@ -79,7 +79,7 @@ def test_no_fail_fast_runs_all(tmp_path: Path) -> None:
         tmp_path,
         '[validate]\nfail_fast = false\ncommands = ["false", "echo should-run"]\n',
     )
-    with patch("refactor_plan.validator.rollback"):
+    with patch("refactor_plan.validation.validator.rollback"):
         report = validate(tmp_path, applied_count=0, write_report=False)
     assert report.passed is False
     assert len(report.commands) == 2
@@ -91,7 +91,7 @@ def test_lint_imports_auto_appended_when_importlinter_exists(tmp_path: Path) -> 
     """.importlinter present → lint-imports appended automatically."""
     (tmp_path / ".importlinter").write_text("", encoding="utf-8")
     _write_toml(tmp_path, "[validate]\ncommands = []\n")
-    with patch("refactor_plan.validator.rollback"):
+    with patch("refactor_plan.validation.validator.rollback"):
         report = validate(tmp_path, applied_count=0, write_report=False)
     cmd_strings = [r.command for r in report.commands]
     assert "lint-imports" in cmd_strings
@@ -101,7 +101,7 @@ def test_lint_imports_not_duplicated(tmp_path: Path) -> None:
     """lint-imports already in config + .importlinter present → only one entry."""
     (tmp_path / ".importlinter").write_text("", encoding="utf-8")
     _write_toml(tmp_path, '[validate]\ncommands = ["lint-imports"]\n')
-    with patch("refactor_plan.validator.rollback"):
+    with patch("refactor_plan.validation.validator.rollback"):
         report = validate(tmp_path, applied_count=0, write_report=False)
     cmd_strings = [r.command for r in report.commands]
     assert cmd_strings.count("lint-imports") == 1
@@ -110,7 +110,7 @@ def test_lint_imports_not_duplicated(tmp_path: Path) -> None:
 def test_rollback_invoked_on_failure(tmp_path: Path) -> None:
     """On failure, rollback is called once with (repo_root, applied_count)."""
     _write_toml(tmp_path, '[validate]\ncommands = ["false"]\n')
-    with patch("refactor_plan.validator.rollback") as mock_rollback:
+    with patch("refactor_plan.validation.validator.rollback") as mock_rollback:
         report = validate(tmp_path, applied_count=3, write_report=False)
     assert report.passed is False
     assert report.rolled_back is True
@@ -125,7 +125,7 @@ def test_cleanup_paths_deleted_on_failure(tmp_path: Path) -> None:
     other_file.write_text("# extra", encoding="utf-8")
 
     _write_toml(tmp_path, '[validate]\ncommands = ["false"]\n')
-    with patch("refactor_plan.validator.rollback"):
+    with patch("refactor_plan.validation.validator.rollback"):
         report = validate(
             tmp_path,
             applied_count=0,

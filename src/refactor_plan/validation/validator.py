@@ -13,6 +13,7 @@ from pydantic import BaseModel
 
 from refactor_plan.applicator.rope_runner import Escalation, rollback
 
+
 log = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------

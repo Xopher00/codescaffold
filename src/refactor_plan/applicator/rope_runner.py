@@ -29,6 +29,8 @@ from pathlib import Path
 from typing import Optional
 
 import libcst as cst
+from libcst.codemod import CodemodContext
+from libcst.codemod.visitors import AddImportsVisitor
 from libcst.metadata import (
     ByteSpanPositionProvider,
     MetadataWrapper,
@@ -42,7 +44,8 @@ from rope.refactor.importutils import ImportOrganizer
 from rope.refactor.move import MoveGlobal, MoveModule, create_move
 from rope.refactor.rename import Rename
 
-from refactor_plan.planner import RefactorPlan
+from refactor_plan.planning.planner import RefactorPlan
+
 
 log = logging.getLogger(__name__)
 
@@ -195,11 +198,7 @@ def _preflight_file(
 
 
 def _ensure_future_annotations(path: Path) -> bool:
-    """Inject `from __future__ import annotations` at top of module (after docstring).
-
-    Returns True if the file was modified, False if the import was already present
-    or the file couldn't be parsed.
-    """
+    """Inject `from __future__ import annotations` if not already present."""
     try:
         source = path.read_text(encoding="utf-8")
     except (OSError, UnicodeDecodeError):
@@ -209,43 +208,11 @@ def _ensure_future_annotations(path: Path) -> bool:
     except cst.ParserSyntaxError:
         return False
 
-    # Check if import already exists
-    for stmt in module.body:
-        if isinstance(stmt, cst.SimpleStatementLine):
-            for s in stmt.body:
-                if isinstance(s, cst.ImportFrom):
-                    mod = s.module
-                    if isinstance(mod, cst.Name) and mod.value == "__future__":
-                        names = s.names
-                        if isinstance(names, (list, tuple)):
-                            for alias in names:
-                                if isinstance(alias.name, cst.Name) and alias.name.value == "annotations":
-                                    return False  # already present
-
-    # Build the new import statement
-    new_import = cst.SimpleStatementLine(
-        body=[
-            cst.ImportFrom(
-                module=cst.Name("__future__"),
-                names=[cst.ImportAlias(name=cst.Name("annotations"))],
-            )
-        ]
-    )
-
-    # Insert position: after module docstring if any, else at index 0
-    insert_idx = 0
-    if module.body:
-        first = module.body[0]
-        if isinstance(first, cst.SimpleStatementLine):
-            for s in first.body:
-                if isinstance(s, cst.Expr) and isinstance(s.value, (cst.SimpleString, cst.ConcatenatedString)):
-                    insert_idx = 1
-                    break
-
-    new_body = list(module.body)
-    new_body.insert(insert_idx, new_import)
-    new_module = module.with_changes(body=tuple(new_body))
-
+    context = CodemodContext()
+    AddImportsVisitor.add_needed_import(context, "__future__", "annotations")
+    new_module = AddImportsVisitor(context).transform_module(module)
+    if new_module.code == source:
+        return False
     path.write_text(new_module.code, encoding="utf-8")
     return True
 
@@ -621,7 +588,7 @@ def _rewrite_cross_cluster_imports(
 
     # Build per-symbol override map:
     # (src_module_tail, symbol_name) → dest_module_dotted
-    # e.g. ("messy_pkg.geom", "distance") → "pkg_004.mod_001"
+    # e.g. ("messy_pkg.geom", "distance") → "refactor_plan.reporting.reporter"
     symbol_name_to_dest: dict[tuple[str, str], str] = {}
     if symbol_moves:
         for sm in symbol_moves:
@@ -667,7 +634,6 @@ def _find_current_path(
     now lives at 'pkg_NNN/mod_MMM.py'. Strategy:
     1. Check the plan's src→dest mapping (most reliable post-F1).
     2. Try the direct original path (for files not yet moved).
-    3. Search by original basename (fallback for files moved but not renamed).
     """
     # 1. Use the plan's dest path if available
     if src_to_dest is not None and original_src in src_to_dest:
@@ -678,15 +644,7 @@ def _find_current_path(
     direct = _resolve_src_path(repo_root, original_src)
     if direct is not None and direct.exists():
         return direct
-    # 3. Search by original basename (moved but not yet renamed — intermediate state)
-    basename = Path(original_src).name
-    candidates = [
-        p for p in repo_root.rglob(basename)
-        if p.is_file()
-        and ".ropeproject" not in p.parts
-        and "__pycache__" not in p.parts
-    ]
-    return candidates[0] if candidates else None
+    return None
 
 
 def apply_plan(

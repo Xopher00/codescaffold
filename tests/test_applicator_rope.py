@@ -15,8 +15,8 @@ from rope.base import libutils
 from rope.base.project import Project
 from rope.refactor.move import MoveGlobal, create_move
 
-from refactor_plan.cluster_view import build_view
-from refactor_plan.planner import plan
+from refactor_plan.interface.cluster_view import build_view
+from refactor_plan.planning.planner import plan
 from refactor_plan.applicator.rope_runner import (
     ApplyResult,
     apply_plan,
@@ -944,7 +944,7 @@ def test_cross_cluster_rewriter_deeply_nested_module(tmp_path):
 # ---------------------------------------------------------------------------
 
 
-from refactor_plan.planner import (
+from refactor_plan.planning.planner import (
     FileMove,
     ClusterAlloc,
     RefactorPlan,

@@ -10,12 +10,11 @@ import json
 import logging
 from pathlib import Path
 
-import networkx as nx
-
 import graphify.build as gbuild
 import graphify.cluster as gcluster
 import graphify.export as gexport
 from graphify.extract import collect_files, extract
+
 
 log = logging.getLogger(__name__)
 
@@ -124,18 +123,3 @@ def _resolve_once(raw: str, repo_root: Path) -> Path | None:
 def repo_relative(abs_path: Path, repo_root: Path) -> str:
     """Convert an absolute path to a repo-relative posix string."""
     return abs_path.relative_to(repo_root.resolve()).as_posix()
-
-
-def source_package(abs_path: Path, repo_root: Path) -> str | None:
-    """Return the immediate parent package name, or None for root-level modules."""
-    rel = abs_path.relative_to(repo_root.resolve())
-    parts = rel.parts
-    if len(parts) >= 2:
-        return parts[-2]
-    return None
-
-
-def dotted_module(abs_path: Path, repo_root: Path) -> str:
-    """Convert an absolute .py path to a dotted Python module name."""
-    rel = abs_path.relative_to(repo_root.resolve())
-    return rel.with_suffix("").as_posix().replace("/", ".")

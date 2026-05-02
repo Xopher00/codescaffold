@@ -12,12 +12,10 @@ from pathlib import Path
 
 import pytest
 
-from refactor_plan.graph_bridge import (
-    dotted_module,
+from refactor_plan.interface.graph_bridge import (
     ensure_graph,
     normalize_source_files,
     repo_relative,
-    source_package,
 )
 
 # ---------------------------------------------------------------------------
@@ -185,64 +183,7 @@ def test_repo_relative(tmp_path):
 
 
 # ---------------------------------------------------------------------------
-# 7. test_source_package
-# ---------------------------------------------------------------------------
-
-def test_source_package(tmp_path):
-    """source_package returns None for root-level, correct parent for nested."""
-    # Root-level module: no parent package
-    root_file = tmp_path / "utils.py"
-    root_file.touch()
-    assert source_package(root_file.resolve(), tmp_path) is None
-
-    # One level: parent dir is the package
-    pkg = tmp_path / "mylib"
-    pkg.mkdir()
-    mod = pkg / "core.py"
-    mod.touch()
-    assert source_package(mod.resolve(), tmp_path) == "mylib"
-
-    # Two levels deep: immediate parent is the sub-package
-    sub = pkg / "sub"
-    sub.mkdir()
-    deep = sub / "utils.py"
-    deep.touch()
-    assert source_package(deep.resolve(), tmp_path) == "sub"
-
-
-# ---------------------------------------------------------------------------
-# 8. test_dotted_module
-# ---------------------------------------------------------------------------
-
-def test_dotted_module(tmp_path):
-    """dotted_module converts .py paths to dotted Python module names."""
-    # Root-level
-    root_file = tmp_path / "utils.py"
-    root_file.touch()
-    assert dotted_module(root_file.resolve(), tmp_path) == "utils"
-
-    # Single package
-    pkg = tmp_path / "mylib"
-    pkg.mkdir()
-    mod = pkg / "core.py"
-    mod.touch()
-    assert dotted_module(mod.resolve(), tmp_path) == "mylib.core"
-
-    # Nested package
-    sub = pkg / "sub"
-    sub.mkdir()
-    deep = sub / "mod.py"
-    deep.touch()
-    assert dotted_module(deep.resolve(), tmp_path) == "mylib.sub.mod"
-
-    # __init__.py
-    init = pkg / "__init__.py"
-    init.touch()
-    assert dotted_module(init.resolve(), tmp_path) == "mylib.__init__"
-
-
-# ---------------------------------------------------------------------------
-# 9. test_normalize_against_unified_algebra
+# 7. test_normalize_against_unified_algebra
 # ---------------------------------------------------------------------------
 
 @pytest.mark.skipif(

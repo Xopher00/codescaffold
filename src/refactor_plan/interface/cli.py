@@ -9,6 +9,18 @@ from rope.base import libutils
 from rope.base.project import Project
 from rope.refactor.rename import Rename
 
+from refactor_plan.interface.cluster_view import build_view, load_graph
+from refactor_plan.interface.graph_bridge import ensure_graph, normalize_source_files
+from refactor_plan.entropy.cleaner import (
+    DeadCodeReport,
+    apply_dead_code_report,
+    build_dead_code_report,
+    load_dead_code_report,
+    save_dead_code_report,
+)
+from refactor_plan.entropy.splitter import SplitPlan, apply_split_plan, build_split_plan
+from refactor_plan.planning.planner import RefactorPlan, plan as build_plan, write_plan
+from refactor_plan.reporting.reporter import render_dead_code_report_md, render_dry_run_report
 from refactor_plan.applicator.rope_runner import (
     AppliedAction,
     ApplyResult,
@@ -16,23 +28,9 @@ from refactor_plan.applicator.rope_runner import (
     apply_plan,
     rollback,
 )
-from refactor_plan.cleaner import (
-    DeadCodeReport,
-    apply_dead_code_report,
-    build_dead_code_report,
-    load_dead_code_report,
-    save_dead_code_report,
-)
-from refactor_plan.cluster_view import build_view, load_graph
-from refactor_plan.graph_bridge import ensure_graph, normalize_source_files
-from refactor_plan.namer import RenameMap, name_clusters as propose_rename_map
-from refactor_plan.namer import write_rename_map
-from refactor_plan.planner import RefactorPlan
-from refactor_plan.planner import plan as build_plan
-from refactor_plan.planner import write_plan
-from refactor_plan.reporter import render_dead_code_report_md, render_dry_run_report
-from refactor_plan.splitter import SplitPlan, apply_split_plan, build_split_plan
-from refactor_plan.validator import validate
+from refactor_plan.validation.validator import validate
+from refactor_plan.naming.namer import RenameMap, name_clusters as propose_rename_map, write_rename_map
+
 
 app = typer.Typer(
     help="Graph-driven structural refactoring assistant.",
@@ -333,6 +331,9 @@ def apply_command(
         typer.echo(f"approved {approved} symbol moves")
     result = apply_plan(refactor_plan, repo, only_approved_symbols=True, source_map=source_map)
     _validate_or_exit(repo, result)
+    stale_graph = _graph_path(repo)
+    if stale_graph.exists():
+        stale_graph.unlink()
     typer.echo(f"applied {len(result.applied)} actions; validation passed")
 
 

@@ -6,12 +6,11 @@ import json
 from collections import Counter
 from pathlib import Path
 
-import networkx as nx
-from pydantic import BaseModel
-
 import graphify.analyze as ganalyze
 import graphify.build as gbuild
 import graphify.cluster as gcluster
+import networkx as nx
+from pydantic import BaseModel
 
 
 class FileCluster(BaseModel):

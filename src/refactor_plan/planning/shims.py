@@ -19,7 +19,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Literal
 
-from refactor_plan.planner import FileMove, RefactorPlan, ShimCandidate
+from refactor_plan.planning.planner import FileMove, RefactorPlan
+
 
 _SHIM_TEMPLATE = (
     "# auto-generated compat shim — original path preserved for external importers\n"

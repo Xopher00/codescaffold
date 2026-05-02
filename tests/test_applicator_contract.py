@@ -7,9 +7,9 @@ import subprocess
 import networkx as nx
 import pytest
 
-from refactor_plan.applicator.contract import build_cluster_dag, emit_contract
-from refactor_plan.cluster_view import build_view
-from refactor_plan.planner import plan
+from refactor_plan.contracts.import_contracts import build_cluster_dag, emit_contract
+from refactor_plan.interface.cluster_view import build_view
+from refactor_plan.planning.planner import plan
 
 FIXTURE_GRAPH = (
     Path(__file__).parent

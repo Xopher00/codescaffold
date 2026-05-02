@@ -29,8 +29,9 @@ from typing import cast
 
 from pydantic import BaseModel
 
-from refactor_plan.cluster_view import GraphView
-from refactor_plan.planner import RefactorPlan
+from refactor_plan.interface.cluster_view import GraphView
+from refactor_plan.planning.planner import RefactorPlan
+
 
 logger = logging.getLogger(__name__)
 

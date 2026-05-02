@@ -17,9 +17,9 @@ import graphify.analyze as ganalyze
 import graphify.cluster as gcluster
 import graphify.report as greport
 
-from refactor_plan.cleaner import DeadCodeReport
-from refactor_plan.cluster_view import GraphView, load_graph
-from refactor_plan.planner import RefactorPlan
+from refactor_plan.interface.cluster_view import GraphView, load_graph
+from refactor_plan.entropy.cleaner import DeadCodeReport
+from refactor_plan.planning.planner import RefactorPlan
 
 
 def _format_header(plan: RefactorPlan, view: GraphView) -> str:
@@ -159,61 +159,6 @@ def _format_splitting_candidates(plan: RefactorPlan) -> str:
     return "\n".join(lines)
 
 
-def _format_god_nodes(view: GraphView) -> str:
-    """Format top god nodes as a bulleted list."""
-    lines = ["## God nodes (high edge count)", ""]
-
-    if not view.god_nodes:
-        lines.append("(no god nodes detected)")
-        lines.append("")
-        return "\n".join(lines)
-
-    for node in view.god_nodes[:5]:
-        label = node.get("label", node.get("id", "unknown"))
-        edges = node.get("edges", 0)
-        lines.append(f"- `{label}`: {edges} edges")
-
-    lines.append("")
-    return "\n".join(lines)
-
-
-def _format_surprising_connections(view: GraphView) -> str:
-    """Format surprising connections as a bulleted list."""
-    lines = ["## Surprising connections (cross-community edges)", ""]
-
-    if not view.surprising_connections:
-        lines.append("(no surprising connections detected)")
-        lines.append("")
-        return "\n".join(lines)
-
-    for conn in view.surprising_connections[:10]:
-        question = conn.get("question", "unknown")
-        why = conn.get("why", "")
-        lines.append(f"- {question}")
-        if why:
-            lines.append(f"  - Why: {why}")
-
-    lines.append("")
-    return "\n".join(lines)
-
-
-def _format_suggested_questions(view: GraphView) -> str:
-    """Format suggested questions as a bulleted list."""
-    lines = ["## Suggested questions", ""]
-
-    if not view.suggested_questions:
-        lines.append("(no suggested questions)")
-        lines.append("")
-        return "\n".join(lines)
-
-    for question in view.suggested_questions:
-        q_text = question.get("question", "unknown")
-        lines.append(f"- {q_text}")
-
-    lines.append("")
-    return "\n".join(lines)
-
-
 def _recover_communities_for_graphify(G) -> dict[int, list[str]]:
     """Recover communities dict from per-node community attribute."""
     communities: dict[int, list[str]] = {}
@@ -249,6 +194,29 @@ def render_dry_run_report_text(view: GraphView, plan: RefactorPlan) -> str:
     Returns:
         The rendered report as a string.
     """
+    god_lines = ["## God nodes (high edge count)", ""]
+    for node in view.god_nodes[:5]:
+        god_lines.append(f"- `{node.get('label', node.get('id', 'unknown'))}`: {node.get('edges', 0)} edges")
+    if not view.god_nodes:
+        god_lines.append("(no god nodes detected)")
+    god_lines.append("")
+
+    surprise_lines = ["## Surprising connections (cross-community edges)", ""]
+    for conn in view.surprising_connections[:10]:
+        surprise_lines.append(f"- {conn.get('question', 'unknown')}")
+        if conn.get("why"):
+            surprise_lines.append(f"  - Why: {conn['why']}")
+    if not view.surprising_connections:
+        surprise_lines.append("(no surprising connections detected)")
+    surprise_lines.append("")
+
+    question_lines = ["## Suggested questions", ""]
+    for q in view.suggested_questions:
+        question_lines.append(f"- {q.get('question', 'unknown')}")
+    if not view.suggested_questions:
+        question_lines.append("(no suggested questions)")
+    question_lines.append("")
+
     sections = [
         _format_header(plan, view),
         _format_clusters_table(plan),
@@ -257,9 +225,9 @@ def render_dry_run_report_text(view: GraphView, plan: RefactorPlan) -> str:
         _format_blocked_moves_table(plan),
         _format_shim_candidates_table(plan),
         _format_splitting_candidates(plan),
-        _format_god_nodes(view),
-        _format_surprising_connections(view),
-        _format_suggested_questions(view),
+        "\n".join(god_lines),
+        "\n".join(surprise_lines),
+        "\n".join(question_lines),
     ]
 
     return "\n".join(sections)
@@ -388,80 +356,39 @@ def render_apply_report(
         manifest_str += f"- Imports organized: {imports_organized}\n"
     manifest_str += "\n"
 
-    # Format before/after god_nodes section
-    def _format_god_nodes_before_after(pre: GraphView, post: GraphView) -> str:
-        lines = ["## God nodes (high edge count)", ""]
-        lines.append("### Before")
-        lines.append("")
-        if pre.god_nodes:
-            for node in pre.god_nodes[:5]:
-                label = node.get("label", node.get("id", "unknown"))
-                edges = node.get("edges", 0)
-                lines.append(f"- `{label}`: {edges} edges")
-        else:
-            lines.append("(no god nodes detected)")
-        lines.append("")
-        lines.append("### After")
-        lines.append("")
-        if post.god_nodes:
-            for node in post.god_nodes[:5]:
-                label = node.get("label", node.get("id", "unknown"))
-                edges = node.get("edges", 0)
-                lines.append(f"- `{label}`: {edges} edges")
-        else:
-            lines.append("(no god nodes detected)")
+    def _before_after(heading: str, pre_items: list, post_items: list, empty_msg: str, fmt) -> str:
+        lines = [heading, "", "### Before", ""]
+        lines += [fmt(x) for x in pre_items[:10]] if pre_items else [empty_msg]
+        lines += ["", "### After", ""]
+        lines += [fmt(x) for x in post_items[:10]] if post_items else [empty_msg]
         lines.append("")
         return "\n".join(lines)
 
-    def _format_surprising_connections_before_after(pre: GraphView, post: GraphView) -> str:
-        lines = ["## Surprising connections (cross-community edges)", ""]
-        lines.append("### Before")
-        lines.append("")
-        if pre.surprising_connections:
-            for conn in pre.surprising_connections[:10]:
-                question = conn.get("question", "unknown")
-                why = conn.get("why", "")
-                lines.append(f"- {question}")
-                if why:
-                    lines.append(f"  - Why: {why}")
-        else:
-            lines.append("(no surprising connections detected)")
-        lines.append("")
-        lines.append("### After")
-        lines.append("")
-        if post.surprising_connections:
-            for conn in post.surprising_connections[:10]:
-                question = conn.get("question", "unknown")
-                why = conn.get("why", "")
-                lines.append(f"- {question}")
-                if why:
-                    lines.append(f"  - Why: {why}")
-        else:
-            lines.append("(no surprising connections detected)")
-        lines.append("")
-        return "\n".join(lines)
+    def _fmt_god(node) -> str:
+        return f"- `{node.get('label', node.get('id', 'unknown'))}`: {node.get('edges', 0)} edges"
 
-    def _format_suggested_questions_before_after(pre: GraphView, post: GraphView) -> str:
-        lines = ["## Suggested questions", ""]
-        lines.append("### Before")
-        lines.append("")
-        if pre.suggested_questions:
-            for question in pre.suggested_questions:
-                q_text = question.get("question", "unknown")
-                lines.append(f"- {q_text}")
-        else:
-            lines.append("(no suggested questions)")
-        lines.append("")
-        lines.append("### After")
-        lines.append("")
-        if post.suggested_questions:
-            for question in post.suggested_questions:
-                q_text = question.get("question", "unknown")
-                lines.append(f"- {q_text}")
-        else:
-            lines.append("(no suggested questions)")
-        lines.append("")
-        return "\n".join(lines)
+    def _fmt_conn(conn) -> str:
+        line = f"- {conn.get('question', 'unknown')}"
+        return line + (f"\n  - Why: {conn['why']}" if conn.get("why") else "")
+
+    def _fmt_q(q) -> str:
+        return f"- {q.get('question', 'unknown')}"
+
+    god_delta = _before_after(
+        "## God nodes (high edge count)",
+        pre_view.god_nodes[:5], post_view.god_nodes[:5],
+        "(no god nodes detected)", _fmt_god,
+    )
+    surprise_delta = _before_after(
+        "## Surprising connections (cross-community edges)",
+        pre_view.surprising_connections, post_view.surprising_connections,
+        "(no surprising connections detected)", _fmt_conn,
+    )
+    question_delta = _before_after(
+        "## Suggested questions",
+        pre_view.suggested_questions, post_view.suggested_questions,
+        "(no suggested questions)", _fmt_q,
+    )
 
     # Assemble full report
     sections = [
@@ -471,9 +398,9 @@ def render_apply_report(
         _format_symbol_moves_table(plan),
         _format_shim_candidates_table(plan),
         _format_splitting_candidates(plan),
-        _format_god_nodes_before_after(pre_view, post_view),
-        _format_surprising_connections_before_after(pre_view, post_view),
-        _format_suggested_questions_before_after(pre_view, post_view),
+        god_delta,
+        surprise_delta,
+        question_delta,
         "\n## Pre-apply graphify report\n\n",
         pre_report,
         "\n## Post-apply graphify report\n\n",

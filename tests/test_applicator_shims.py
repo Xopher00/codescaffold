@@ -10,9 +10,9 @@ from pathlib import Path
 
 import pytest
 
-from refactor_plan.cluster_view import build_view
-from refactor_plan.planner import plan
-from refactor_plan.applicator.shims import detect_external_access, emit_shims
+from refactor_plan.interface.cluster_view import build_view
+from refactor_plan.planning.planner import plan
+from refactor_plan.planning.shims import detect_external_access, emit_shims
 
 FIXTURE_GRAPH = (
     Path(__file__).parent

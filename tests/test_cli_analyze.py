@@ -6,8 +6,8 @@ from pathlib import Path
 import pytest
 from typer.testing import CliRunner
 
-from refactor_plan.cli import app
-from refactor_plan.planner import RefactorPlan
+from refactor_plan.interface.cli import app
+from refactor_plan.planning.planner import RefactorPlan
 
 runner = CliRunner()
 

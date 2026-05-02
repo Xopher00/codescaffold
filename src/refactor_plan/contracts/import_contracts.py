@@ -11,8 +11,8 @@ from pathlib import Path
 import networkx as nx
 from pydantic import BaseModel
 
-from refactor_plan.cluster_view import GraphView, load_graph
-from refactor_plan.planner import RefactorPlan
+from refactor_plan.interface.cluster_view import GraphView, load_graph
+from refactor_plan.planning.planner import RefactorPlan
 
 
 class ContractArtifact(BaseModel):

@@ -8,13 +8,13 @@ import networkx as nx
 import pytest
 
 from refactor_plan.applicator.rope_runner import rollback
-from refactor_plan.cleaner import (
+from refactor_plan.entropy.cleaner import (
     DeadCodeReport,
     DeadSymbol,
     apply_dead_code_report,
     build_dead_code_report,
 )
-from refactor_plan.cluster_view import FileCluster, GraphView
+from refactor_plan.interface.cluster_view import FileCluster, GraphView
 
 FIXTURE_GRAPH = (
     Path(__file__).parent

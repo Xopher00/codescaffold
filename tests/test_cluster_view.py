@@ -4,7 +4,7 @@ from pathlib import Path
 
 import pytest
 
-from refactor_plan.cluster_view import GraphView, build_view
+from refactor_plan.interface.cluster_view import GraphView, build_view
 
 FIXTURE_GRAPH = (
     Path(__file__).parent

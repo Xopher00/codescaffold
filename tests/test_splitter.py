@@ -12,8 +12,8 @@ from pathlib import Path
 import networkx as nx
 import pytest
 
-from refactor_plan.cluster_view import GraphView, FileCluster, MisplacedSymbol
-from refactor_plan.splitter import (
+from refactor_plan.interface.cluster_view import GraphView, FileCluster, MisplacedSymbol
+from refactor_plan.entropy.splitter import (
     SplitPlan,
     SymbolSplit,
     build_split_plan,

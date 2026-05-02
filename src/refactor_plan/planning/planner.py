@@ -30,15 +30,15 @@ import sys
 from pathlib import Path
 
 import networkx as nx
+from pydantic import BaseModel
+
+from refactor_plan.interface.cluster_view import GraphView, load_graph
+
 
 if sys.version_info >= (3, 11):
     import tomllib
 else:
     import tomli as tomllib  # type: ignore[no-reuse-def]
-
-from pydantic import BaseModel
-
-from refactor_plan.cluster_view import GraphView, load_graph
 
 
 class FileMove(BaseModel):
