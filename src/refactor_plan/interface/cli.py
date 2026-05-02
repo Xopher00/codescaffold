@@ -66,7 +66,7 @@ def analyze(
 @app.command()
 def apply(
     repo: Path = typer.Argument(..., help="Path to target repository"),
-    dry_run: bool = typer.Option(False, help="Simulate without writing"),
+    dry_run: bool = typer.Option(True, help="Simulate without writing. Pass --no-dry-run to execute."),
 ) -> None:
     """Apply the refactor plan (file moves + symbol moves + import rewrites)."""
     repo = repo.resolve()
@@ -101,15 +101,12 @@ def validate(
 ) -> None:
     """Run validation commands; rollback on failure."""
     repo = repo.resolve()
-    out = _out_dir(repo)
-    report = do_validate(repo, out)
+    report = do_validate(repo)
     status = "PASSED" if report.passed else "FAILED"
     typer.echo(f"Validation {status}")
     for cmd_result in report.commands:
         mark = "OK" if cmd_result.exit_code == 0 else "FAIL"
         typer.echo(f"  [{mark}] {cmd_result.command}")
-    if report.rolled_back:
-        typer.echo("Rollback applied.")
     if not report.passed:
         raise typer.Exit(code=1)
 
