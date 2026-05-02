@@ -33,25 +33,25 @@ def apply_file_move(
         )
 
     try:
-        src_resource = libutils.path_to_resource(project, src_rel)
+        src_resource = libutils.path_to_resource(project, str(src_abs))
     except (ResourceNotFoundError, Exception) as exc:
         return Escalation(
             kind=MoveKind.FILE,
             source=src_str,
             dest=dest_str,
-            reason=f"rope could not resolve source: {src_rel} — {exc}",
+            reason=f"rope could not resolve source: {src_str} — {exc}",
             category="file_move",
             strategy_attempted=MoveStrategy.ROPE,
         )
 
     try:
-        dest_resource = libutils.path_to_resource(project, dest_rel, type="folder")
+        dest_resource = libutils.path_to_resource(project, str(dest_pkg_abs), type="folder")
     except (ResourceNotFoundError, Exception) as exc:
         return Escalation(
             kind=MoveKind.FILE,
             source=src_str,
             dest=dest_str,
-            reason=f"rope could not resolve destination: {dest_rel} — {exc}",
+            reason=f"rope could not resolve destination: {dest_str} — {exc}",
             category="file_move",
             strategy_attempted=MoveStrategy.ROPE,
         )

@@ -20,28 +20,28 @@ def rollback(repo_root: Path, out_dir: Path) -> list[str]:
     if rope_actions:
         project = Project(str(repo_root))
         try:
-            for action in reversed(rope_actions):
+            for i, action in enumerate(reversed(rope_actions)):
                 try:
                     project.history.undo()
                     actions.append(
                         f"rope undo: {action.source} <- {action.dest}"
                     )
                 except Exception as exc:  # noqa: BLE001
+                    remaining = len(rope_actions) - i - 1
                     actions.append(
                         f"rope undo failed for {action.source}: {exc}"
+                        + (f" — {remaining} subsequent action(s) not attempted" if remaining else "")
                     )
-                    break
         finally:
             project.close()
 
     libcst_actions = [
         a
         for a in result.applied
-        if a.strategy == MoveStrategy.LIBCST and a.original_content
+        if a.strategy == MoveStrategy.LIBCST and a.original_content is not None
     ]
     for action in libcst_actions:
-        assert action.original_content is not None
-        for filepath, content in action.original_content.items():
+        for filepath, content in (action.original_content or {}).items():
             try:
                 Path(filepath).write_text(content, encoding="utf-8")
                 actions.append(f"libcst restore: {filepath}")

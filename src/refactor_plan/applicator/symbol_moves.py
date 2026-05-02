@@ -1,29 +1,50 @@
 from __future__ import annotations
 
+import logging
 from pathlib import Path
+
 import libcst as cst
 import rope.base.project as rp
 
 from .models import AppliedAction, Escalation, MoveKind, MoveStrategy
 
+logger = logging.getLogger(__name__)
+
 
 class _SymbolRemover(cst.CSTTransformer):
+    """Remove a top-level FunctionDef or ClassDef by name.
+
+    Guards against depth: only matches definitions directly in the module body,
+    not methods inside classes or nested functions.
+    """
+
     def __init__(self, symbol_name: str) -> None:
         self.symbol_name = symbol_name
         self.removed = False
+        self._depth = 0
 
-    def leave_FunctionDef(
-        self, original_node: cst.FunctionDef, updated_node: cst.FunctionDef
-    ) -> cst.FunctionDef | cst.RemovalSentinel:
-        if updated_node.name.value == self.symbol_name and not self.removed:
-            self.removed = True
-            return cst.RemoveFromParent()
-        return updated_node
+    def visit_ClassDef(self, node: cst.ClassDef) -> bool:
+        self._depth += 1
+        return True
 
     def leave_ClassDef(
         self, original_node: cst.ClassDef, updated_node: cst.ClassDef
     ) -> cst.ClassDef | cst.RemovalSentinel:
-        if updated_node.name.value == self.symbol_name and not self.removed:
+        self._depth -= 1
+        if self._depth == 0 and updated_node.name.value == self.symbol_name and not self.removed:
+            self.removed = True
+            return cst.RemoveFromParent()
+        return updated_node
+
+    def visit_FunctionDef(self, node: cst.FunctionDef) -> bool:
+        self._depth += 1
+        return True
+
+    def leave_FunctionDef(
+        self, original_node: cst.FunctionDef, updated_node: cst.FunctionDef
+    ) -> cst.FunctionDef | cst.RemovalSentinel:
+        self._depth -= 1
+        if self._depth == 0 and updated_node.name.value == self.symbol_name and not self.removed:
             self.removed = True
             return cst.RemoveFromParent()
         return updated_node
@@ -58,9 +79,9 @@ def _organize_imports(file_path: Path, repo_root: Path, project: rp.Project | No
         finally:
             if _owns_project:
                 project.close()
-    except Exception:
+    except Exception as exc:
         # Import organization is best-effort; never crash the applicator
-        pass
+        logger.warning("import organization failed for %s: %s", file_path, exc)
 
 
 def apply_symbol_move(
