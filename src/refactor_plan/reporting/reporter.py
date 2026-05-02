@@ -1,441 +1,109 @@
-"""Reporter: compose graphify report + delta header into STRUCTURE_REPORT.md.
-
-This module is responsible for rendering:
-1. Dry-run reports: delta header + cluster summary + plan tables (no graphify.report.generate).
-2. Apply reports: delta header + graphify.report.generate(pre/post) + graph_diff + validation.
-
-The key principle is that we use graphify's own report generator for the structural pages
-and only provide additional delta sections for our refactoring-specific data.
-"""
-
 from __future__ import annotations
 
-from datetime import datetime
 from pathlib import Path
 
-import graphify.analyze as ganalyze
-import graphify.cluster as gcluster
-import graphify.report as greport
-
-from refactor_plan.interface.cluster_view import GraphView, load_graph
-from refactor_plan.entropy.cleaner import DeadCodeReport
-from refactor_plan.planning.planner import RefactorPlan
+from refactor_plan.applicator.models import ApplyResult, MoveKind, MoveStrategy
 
 
-def _format_header(plan: RefactorPlan, view: GraphView) -> str:
-    """Format the title and summary header section."""
-    date_str = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
-
-    file_moves_count = len(plan.file_moves)
-    symbol_moves_count = len(plan.symbol_moves)
-    symbol_moves_approved = sum(1 for s in plan.symbol_moves if s.approved)
-    shim_count = len(plan.shim_candidates)
-    splitting_count = len(plan.splitting_candidates)
-
-    return f"""# STRUCTURE_REPORT
-
-**Generated:** {date_str}
-
-## Summary
-
-- **Clusters detected:** {len(plan.clusters)}
-- **File moves proposed:** {file_moves_count}
-- **Symbol moves proposed:** {symbol_moves_count} ({symbol_moves_approved} approved)
-- **Shim candidates:** {shim_count}
-- **Splitting candidates:** {splitting_count}
-- **God nodes:** {len(view.god_nodes)}
-- **Surprising connections:** {len(view.surprising_connections)}
-
-"""
+def _risk(kind: str, source: str, dest: str) -> str:
+    if kind == MoveKind.SYMBOL:
+        return "HIGH"
+    src_parent = str(Path(source).parent)
+    dst_parent = str(Path(dest).parent)
+    return "LOW" if src_parent == dst_parent else "MEDIUM"
 
 
-def _format_clusters_table(plan: RefactorPlan) -> str:
-    """Format clusters as a markdown table."""
-    lines = ["## Clusters", ""]
-    lines.append("| Package | Community ID | Files | Cohesion |")
-    lines.append("|---------|--------------|-------|----------|")
+def render_dry_run_report(plan: dict, repo_root: str) -> str:
+    file_moves: list[dict] = plan.get("file_moves", [])
+    symbol_moves: list[dict] = plan.get("symbol_moves", [])
+    communities: list = plan.get("communities", [])
 
-    for cluster in plan.clusters:
-        lines.append(
-            f"| {cluster.name} | {cluster.community_id} | {len(cluster.files)} | {cluster.cohesion:.3f} |"
-        )
-
-    lines.append("")
-    return "\n".join(lines)
-
-
-def _format_file_moves_table(plan: RefactorPlan) -> str:
-    """Format file moves as a markdown table."""
-    lines = ["## File moves", ""]
-
-    if not plan.file_moves:
-        lines.append("(no file moves)")
-        lines.append("")
-        return "\n".join(lines)
-
-    lines.append("| Source | Destination | Cluster | Cohesion |")
-    lines.append("|--------|-------------|---------|----------|")
-
-    for move in plan.file_moves:
-        lines.append(
-            f"| {move.src} | {move.dest} | {move.cluster} | {move.cohesion:.3f} |"
-        )
-
-    lines.append("")
-    return "\n".join(lines)
-
-
-def _format_symbol_moves_table(plan: RefactorPlan) -> str:
-    """Format symbol moves as a markdown table."""
-    lines = ["## Symbol moves", ""]
-
-    if not plan.symbol_moves:
-        lines.append("(no symbol moves)")
-        lines.append("")
-        return "\n".join(lines)
-
-    lines.append("| Symbol | Source file | Dest cluster | Approved |")
-    lines.append("|--------|-------------|--------------|----------|")
-
-    for move in plan.symbol_moves:
-        approved_str = "✓" if move.approved else "✗"
-        lines.append(
-            f"| {move.label} | {move.src_file} | {move.dest_cluster} | {approved_str} |"
-        )
-
-    lines.append("")
-    return "\n".join(lines)
-
-
-def _format_blocked_moves_table(plan: RefactorPlan) -> str:
-    """Format blocked moves as a markdown table."""
     lines: list[str] = []
+    lines.append("# Structure Report\n")
 
-    if plan.blocked_moves:
-        lines.append("\n## Blocked Moves\n")
-        lines.append("| Symbol | Source File | Target Community | Reason |")
-        lines.append("|--------|-----------|-----------------|--------|")
-        for bm in plan.blocked_moves:
-            lines.append(f"| {bm.label} | {bm.src_file} | {bm.target_community} | {bm.reason} |")
+    lines.append("## Summary\n")
+    lines.append(f"- Communities detected: {len(communities)}")
+    lines.append(f"- File moves proposed: {len(file_moves)}")
+    lines.append(f"- Symbol moves proposed: {len(symbol_moves)}")
+    lines.append(f"- Repository root: `{repo_root}`\n")
+
+    if file_moves:
+        lines.append("## File Moves\n")
+        lines.append("| Source | Destination | Risk |")
+        lines.append("|--------|-------------|------|")
+        for m in file_moves:
+            src, dst = m.get("source", ""), m.get("dest", "")
+            risk = _risk("FILE", src, dst)
+            lines.append(f"| `{src}` | `{dst}` | {risk} |")
         lines.append("")
 
-    return "\n".join(lines)
-
-
-def _format_shim_candidates_table(plan: RefactorPlan) -> str:
-    """Format shim candidates as a markdown table."""
-    lines = ["## Shim candidates", ""]
-
-    if not plan.shim_candidates:
-        lines.append("(no shim candidates)")
+    if symbol_moves:
+        lines.append("## Symbol Moves\n")
+        lines.append("| Source | Destination | Symbol | Risk |")
+        lines.append("|--------|-------------|--------|------|")
+        for m in symbol_moves:
+            src = m.get("source", "")
+            dst = m.get("dest", "")
+            sym = m.get("symbol", "")
+            lines.append(f"| `{src}` | `{dst}` | `{sym}` | HIGH |")
         lines.append("")
-        return "\n".join(lines)
 
-    lines.append("| Source | Triggers |")
-    lines.append("|--------|----------|")
-
-    for candidate in plan.shim_candidates:
-        triggers_str = ", ".join(candidate.triggers)
-        lines.append(f"| {candidate.src} | {triggers_str} |")
-
+    lines.append("## Validation Plan\n")
+    for cmd in plan.get("validation_commands", ["python -m compileall .", "pytest", "ruff check ."]):
+        lines.append(f"- `{cmd}`")
     lines.append("")
-    return "\n".join(lines)
+
+    lines.append("## Known Limitations\n")
+    lines.append("- Symbol moves use LibCST for syntax-preserving extraction.")
+    lines.append("- Cross-package moves may require manual import shim review.")
+    lines.append("- Placeholder names are intentional; semantic renaming is a later phase.")
+
+    return "\n".join(lines) + "\n"
 
 
-def _format_splitting_candidates(plan: RefactorPlan) -> str:
-    """Format splitting candidates as a bulleted list."""
-    lines = ["## Splitting candidates", ""]
+def render_apply_report(result: ApplyResult) -> str:
+    lines: list[str] = []
+    lines.append("# Apply Report\n")
 
-    if not plan.splitting_candidates:
-        lines.append("(no splitting candidates)")
+    lines.append("## Applied\n")
+    lines.append(f"Total applied: {len(result.applied)}\n")
+    if result.applied:
+        lines.append("| Source | Destination | Strategy | Imports Rewritten | Validation |")
+        lines.append("|--------|-------------|----------|-------------------|------------|")
+        for a in result.applied:
+            strat = a.strategy.value if a.strategy else "—"
+            valid = "pass" if a.validation_passed else ("fail" if a.validation_passed is False else "—")
+            lines.append(f"| `{a.source}` | `{a.dest}` | {strat} | {a.imports_rewritten} | {valid} |")
         lines.append("")
-        return "\n".join(lines)
 
-    for candidate in plan.splitting_candidates:
-        lines.append(f"- **{candidate.type}**: {candidate.question}")
-        lines.append(f"  - Why: {candidate.why}")
-
-    lines.append("")
-    return "\n".join(lines)
-
-
-def _recover_communities_for_graphify(G) -> dict[int, list[str]]:
-    """Recover communities dict from per-node community attribute."""
-    communities: dict[int, list[str]] = {}
-    for n, d in G.nodes(data=True):
-        cid = d.get("community")
-        if cid is not None:
-            communities.setdefault(cid, []).append(n)
-    return communities
-
-
-def _make_detection_result_stub() -> dict:
-    """Create a minimal stub detection_result for graphify.report.generate."""
-    return {
-        "total_files": 0,
-        "total_words": 0,
-        "warning": None,
-        "files": {"code": []},
-    }
-
-
-def _make_token_cost_stub() -> dict:
-    """Create a minimal stub token_cost for graphify.report.generate."""
-    return {"input": 0, "output": 0}
-
-
-def render_dry_run_report_text(view: GraphView, plan: RefactorPlan) -> str:
-    """Dry-run: delta header + cluster summary + plan tables. Returns text (no write).
-
-    Args:
-        view: The GraphView containing structural analysis.
-        plan: The RefactorPlan to render.
-
-    Returns:
-        The rendered report as a string.
-    """
-    god_lines = ["## God nodes (high edge count)", ""]
-    for node in view.god_nodes[:5]:
-        god_lines.append(f"- `{node.get('label', node.get('id', 'unknown'))}`: {node.get('edges', 0)} edges")
-    if not view.god_nodes:
-        god_lines.append("(no god nodes detected)")
-    god_lines.append("")
-
-    surprise_lines = ["## Surprising connections (cross-community edges)", ""]
-    for conn in view.surprising_connections[:10]:
-        surprise_lines.append(f"- {conn.get('question', 'unknown')}")
-        if conn.get("why"):
-            surprise_lines.append(f"  - Why: {conn['why']}")
-    if not view.surprising_connections:
-        surprise_lines.append("(no surprising connections detected)")
-    surprise_lines.append("")
-
-    question_lines = ["## Suggested questions", ""]
-    for q in view.suggested_questions:
-        question_lines.append(f"- {q.get('question', 'unknown')}")
-    if not view.suggested_questions:
-        question_lines.append("(no suggested questions)")
-    question_lines.append("")
-
-    sections = [
-        _format_header(plan, view),
-        _format_clusters_table(plan),
-        _format_file_moves_table(plan),
-        _format_symbol_moves_table(plan),
-        _format_blocked_moves_table(plan),
-        _format_shim_candidates_table(plan),
-        _format_splitting_candidates(plan),
-        "\n".join(god_lines),
-        "\n".join(surprise_lines),
-        "\n".join(question_lines),
-    ]
-
-    return "\n".join(sections)
-
-
-def render_dry_run_report(
-    plan: RefactorPlan,
-    view: GraphView,
-    output_path: Path,
-) -> None:
-    """Dry-run: delta header + cluster summary + plan tables."""
-    report = render_dry_run_report_text(view, plan)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(report, encoding="utf-8")
-
-
-def render_apply_report(
-    plan: RefactorPlan,
-    pre_view: GraphView,
-    post_view: GraphView,
-    pre_graph_path: Path,
-    post_graph_path: Path,
-    manifest: dict,
-    validation: dict | None,
-    output_path: Path,
-    *,
-    repo_root: Path,
-) -> None:
-    """Apply: delta header + graphify.report.generate(pre/post) + graph_diff + validation.
-
-    Args:
-        plan: The RefactorPlan that was applied.
-        pre_view: GraphView before applying the plan.
-        post_view: GraphView after applying the plan.
-        pre_graph_path: Path to pre-apply graph.json.
-        post_graph_path: Path to post-apply graph.json.
-        manifest: Dictionary of applied changes (file moves, symbol moves, shims, etc.).
-        validation: Dictionary of validation results (can be None).
-        output_path: Path where to write the report.
-        repo_root: Repository root for graphify.report.generate.
-    """
-    # Load the actual graph objects for graphify.report.generate
-    pre_G = load_graph(pre_graph_path)
-    post_G = load_graph(post_graph_path)
-
-    # Recover communities for graphify
-    pre_communities = _recover_communities_for_graphify(pre_G)
-    post_communities = _recover_communities_for_graphify(post_G)
-
-    # Compute cohesion scores
-    pre_cohesion = gcluster.score_all(pre_G, pre_communities)
-    post_cohesion = gcluster.score_all(post_G, post_communities)
-
-    # Create community labels
-    pre_labels = {cid: f"pkg_{cid:03d}" for cid in pre_communities}
-    post_labels = {cid: f"pkg_{cid:03d}" for cid in post_communities}
-
-    # Get graphify analyses
-    pre_god_nodes = ganalyze.god_nodes(pre_G, top_n=10)
-    post_god_nodes = ganalyze.god_nodes(post_G, top_n=10)
-
-    pre_surprising = ganalyze.surprising_connections(pre_G, pre_communities, top_n=20)
-    post_surprising = ganalyze.surprising_connections(post_G, post_communities, top_n=20)
-
-    pre_questions = ganalyze.suggest_questions(pre_G, pre_communities, pre_labels)
-    post_questions = ganalyze.suggest_questions(post_G, post_communities, post_labels)
-
-    # Stubs for graphify
-    detection_stub = _make_detection_result_stub()
-    token_stub = _make_token_cost_stub()
-
-    # Generate graphify reports
-    pre_report = greport.generate(
-        pre_G,
-        pre_communities,
-        pre_cohesion,
-        pre_labels,
-        pre_god_nodes,
-        pre_surprising,
-        detection_stub,
-        token_stub,
-        str(repo_root),
-        suggested_questions=pre_questions,
-    )
-
-    post_report = greport.generate(
-        post_G,
-        post_communities,
-        post_cohesion,
-        post_labels,
-        post_god_nodes,
-        post_surprising,
-        detection_stub,
-        token_stub,
-        str(repo_root),
-        suggested_questions=post_questions,
-    )
-
-    # Generate graph diff
-    try:
-        graph_diff = ganalyze.graph_diff(pre_G, post_G)
-        graph_diff_str = f"## Graph diff\n\n```\n{graph_diff}\n```\n\n"
-    except Exception:
-        graph_diff_str = "## Graph diff\n\n(Unable to compute graph diff)\n\n"
-
-    # Format validation results
-    validation_str = ""
-    if validation:
-        validation_str = "## Validation results\n\n"
-        if isinstance(validation, dict):
-            for key, value in validation.items():
-                validation_str += f"- **{key}**: {value}\n"
-        validation_str += "\n"
-
-    # Format manifest
-    manifest_str = "## Manifest\n\n"
-    if isinstance(manifest, dict):
-        file_moves_applied = manifest.get("file_moves_applied", 0)
-        symbol_moves_applied = manifest.get("symbol_moves_applied", 0)
-        shims_created = manifest.get("shims_created", 0)
-        imports_organized = manifest.get("imports_organized", 0)
-
-        manifest_str += f"- File moves applied: {file_moves_applied}\n"
-        manifest_str += f"- Symbol moves applied: {symbol_moves_applied}\n"
-        manifest_str += f"- Shims created: {shims_created}\n"
-        manifest_str += f"- Imports organized: {imports_organized}\n"
-    manifest_str += "\n"
-
-    def _before_after(heading: str, pre_items: list, post_items: list, empty_msg: str, fmt) -> str:
-        lines = [heading, "", "### Before", ""]
-        lines += [fmt(x) for x in pre_items[:10]] if pre_items else [empty_msg]
-        lines += ["", "### After", ""]
-        lines += [fmt(x) for x in post_items[:10]] if post_items else [empty_msg]
+    escalated = result.skipped + result.failed + result.blocked
+    if escalated:
+        lines.append("## Escalated / Failed / Blocked\n")
+        lines.append("| Source | Category | Reason | Strategy Attempted |")
+        lines.append("|--------|----------|--------|--------------------|")
+        for e in escalated:
+            strat = e.strategy_attempted.value if e.strategy_attempted else "—"
+            lines.append(f"| `{e.source}` | {e.category} | {e.reason} | {strat} |")
         lines.append("")
-        return "\n".join(lines)
 
-    def _fmt_god(node) -> str:
-        return f"- `{node.get('label', node.get('id', 'unknown'))}`: {node.get('edges', 0)} edges"
-
-    def _fmt_conn(conn) -> str:
-        line = f"- {conn.get('question', 'unknown')}"
-        return line + (f"\n  - Why: {conn['why']}" if conn.get("why") else "")
-
-    def _fmt_q(q) -> str:
-        return f"- {q.get('question', 'unknown')}"
-
-    god_delta = _before_after(
-        "## God nodes (high edge count)",
-        pre_view.god_nodes[:5], post_view.god_nodes[:5],
-        "(no god nodes detected)", _fmt_god,
-    )
-    surprise_delta = _before_after(
-        "## Surprising connections (cross-community edges)",
-        pre_view.surprising_connections, post_view.surprising_connections,
-        "(no surprising connections detected)", _fmt_conn,
-    )
-    question_delta = _before_after(
-        "## Suggested questions",
-        pre_view.suggested_questions, post_view.suggested_questions,
-        "(no suggested questions)", _fmt_q,
-    )
-
-    # Assemble full report
-    sections = [
-        _format_header(plan, pre_view),
-        _format_clusters_table(plan),
-        _format_file_moves_table(plan),
-        _format_symbol_moves_table(plan),
-        _format_shim_candidates_table(plan),
-        _format_splitting_candidates(plan),
-        god_delta,
-        surprise_delta,
-        question_delta,
-        "\n## Pre-apply graphify report\n\n",
-        pre_report,
-        "\n## Post-apply graphify report\n\n",
-        post_report,
-        graph_diff_str,
-        validation_str,
-        manifest_str,
-    ]
-
-    report = "\n".join(str(s) for s in sections)
-    output_path.parent.mkdir(parents=True, exist_ok=True)
-    output_path.write_text(report, encoding="utf-8")
-
-
-def render_dead_code_report_md(report: DeadCodeReport) -> str:
-    """Render a DeadCodeReport as a markdown table (DEAD_CODE_REPORT.md).
-
-    Approvals remain in the JSON; this function is output-only.
-    The Approved column shows `[x]` if entry.approved is True, else `[ ]`.
-    """
-    lines = ["# DEAD_CODE_REPORT", ""]
-    lines.append("| Label | Source file | Source location | Rationale | Approved |")
-    lines.append("|-------|-------------|-----------------|-----------|----------|")
-
-    for sym in report.symbols:
-        approved_str = "[x]" if sym.approved else "[ ]"
-        # Embed edge_context into rationale column for clarity
-        rationale_col = f"{sym.rationale} ({sym.edge_context})"
-        lines.append(
-            f"| {sym.label} | {sym.source_file} | {sym.source_location} "
-            f"| {rationale_col} | {approved_str} |"
-        )
-
-    if not report.symbols:
-        lines.append("| (none) | | | | |")
-
+    lines.append("## Strategy Summary\n")
+    rope_count = sum(1 for a in result.applied if a.strategy == MoveStrategy.ROPE)
+    libcst_count = sum(1 for a in result.applied if a.strategy == MoveStrategy.LIBCST)
+    lines.append(f"- rope: {rope_count}")
+    lines.append(f"- libcst: {libcst_count}")
     lines.append("")
-    return "\n".join(lines)
+
+    lines.append("## Validation Results\n")
+    passed = sum(1 for a in result.applied if a.validation_passed is True)
+    failed = sum(1 for a in result.applied if a.validation_passed is False)
+    lines.append(f"- Passed: {passed}")
+    lines.append(f"- Failed: {failed}")
+    lines.append(f"- Not run: {len(result.applied) - passed - failed}")
+
+    return "\n".join(lines) + "\n"
+
+
+def write_report(content: str, out_path: Path) -> Path:
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    out_path.write_text(content, encoding="utf-8")
+    return out_path

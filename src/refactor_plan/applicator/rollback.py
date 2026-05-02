@@ -1,0 +1,51 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+from rope.base.project import Project
+
+from .manifests import read_manifest
+from .models import ApplyResult, MoveStrategy
+
+
+def rollback(repo_root: Path, out_dir: Path) -> list[str]:
+    """Undo the last apply batch. Returns list of actions taken."""
+    result: ApplyResult | None = read_manifest(out_dir)
+    if result is None:
+        return ["No manifest found — nothing to rollback"]
+
+    actions: list[str] = []
+
+    rope_actions = [a for a in result.applied if a.strategy == MoveStrategy.ROPE]
+    if rope_actions:
+        project = Project(str(repo_root))
+        try:
+            for action in reversed(rope_actions):
+                try:
+                    project.history.undo()
+                    actions.append(
+                        f"rope undo: {action.source} <- {action.dest}"
+                    )
+                except Exception as exc:  # noqa: BLE001
+                    actions.append(
+                        f"rope undo failed for {action.source}: {exc}"
+                    )
+                    break
+        finally:
+            project.close()
+
+    libcst_actions = [
+        a
+        for a in result.applied
+        if a.strategy == MoveStrategy.LIBCST and a.original_content
+    ]
+    for action in libcst_actions:
+        assert action.original_content is not None
+        for filepath, content in action.original_content.items():
+            try:
+                Path(filepath).write_text(content, encoding="utf-8")
+                actions.append(f"libcst restore: {filepath}")
+            except Exception as exc:  # noqa: BLE001
+                actions.append(f"libcst restore failed for {filepath}: {exc}")
+
+    return actions

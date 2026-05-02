@@ -1,6 +1,0 @@
-[validate]
-commands = [
-  "python -m compileall messy_pkg",
-  "pytest -q tests || true",
-]
-fail_fast = true
