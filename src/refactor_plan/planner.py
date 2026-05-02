@@ -59,6 +59,14 @@ class SymbolMove(BaseModel):
     approved: bool = False  # human-gated
 
 
+class BlockedMove(BaseModel):
+    symbol_id: str
+    label: str
+    src_file: str
+    target_community: int
+    reason: str
+
+
 class ShimCandidate(BaseModel):
     src: str                  # repo-relative original path
     triggers: list[str]       # which heuristic(s) fired
@@ -84,6 +92,7 @@ class RefactorPlan(BaseModel):
     symbol_moves: list[SymbolMove]
     shim_candidates: list[ShimCandidate]
     splitting_candidates: list[SplittingCandidate]
+    blocked_moves: list[BlockedMove] = []
 
 
 # ---------------------------------------------------------------------------
@@ -180,7 +189,7 @@ def _parse_pyproject_scripts(repo_root: Path) -> set[str]:
     return refs
 
 
-def _shim_triggers(src: str, repo_root: Path, all_exports: set[str], pyproject_refs: set[str]) -> list[str]:
+def _shim_triggers(src: str, repo_root: Path, all_exports: set[str], pyproject_refs: set[str], source_map: dict[str, Path] | None = None) -> list[str]:
     """Return list of trigger names that fire for this source file."""
     triggers: list[str] = []
     p = Path(src)
@@ -188,15 +197,16 @@ def _shim_triggers(src: str, repo_root: Path, all_exports: set[str], pyproject_r
     # Trigger A: file defines a top-level name that appears in any __all__.
     # We compare top-level ClassDef/FunctionDef/AsyncFunctionDef/Assign names
     # against the collected __all__ exports (exact match, case-sensitive).
-    # Path resolution: src may be an abs-style relative path from graphify output
-    # (e.g. "tests/fixtures/messy_repo/messy_pkg/vec.py"), which doesn't resolve
-    # correctly via repo_root / src. Try direct Path(src) first (relative to CWD),
-    # then repo_root / src, then repo_root / basename as last resort.
+    # Path resolution: prefer source_map (authoritative, CWD-independent);
+    # fall back to candidate probing when source_map is None.
     src_path: Path | None = None
-    for candidate in [repo_root / src, Path(src), repo_root / Path(src).name]:
-        if candidate.exists():
-            src_path = candidate
-            break
+    if source_map is not None and src in source_map:
+        src_path = source_map[src]
+    else:
+        for candidate in [repo_root / src, Path(src)]:
+            if candidate.exists():
+                src_path = candidate
+                break
     if src_path is not None and bool(_top_level_names(src_path) & all_exports):
         triggers.append("in __all__")
 
@@ -316,7 +326,7 @@ def _dest_file_for_symbol(
     return f"{dest_cluster}/{file_to_mod[chosen]}"
 
 
-def plan(view: GraphView, repo_root: Path, graph_json_path: Path | None = None) -> RefactorPlan:
+def plan(view: GraphView, repo_root: Path, graph_json_path: Path | None = None, *, source_map: dict[str, Path] | None = None) -> RefactorPlan:
     """Turn a GraphView into a RefactorPlan (deterministic, no new analysis).
 
     graph_json_path is required for A3 (dest_file computation). When None,
@@ -378,10 +388,25 @@ def plan(view: GraphView, repo_root: Path, graph_json_path: Path | None = None) 
 
     # 3. Symbol moves: skip methods (A1). Compute dest_file (A3).
     symbol_moves: list[SymbolMove] = []
+    blocked_moves: list[BlockedMove] = []
     for m in view.misplaced_symbols:
         # A1: skip bound methods — rope's create_move operates on top-level
         # definitions only; passing methods causes "Destination attribute not found".
         if m.label.startswith("."):
+            continue
+        if m.target_community not in community_to_pkg:
+            blocked_moves.append(
+                BlockedMove(
+                    symbol_id=m.symbol_id,
+                    label=m.label,
+                    src_file=m.host_file,
+                    target_community=m.target_community,
+                    reason=(
+                        f"target community {m.target_community} has no file-backed cluster; "
+                        f"available: {sorted(community_to_pkg.keys())}"
+                    ),
+                )
+            )
             continue
         dest_cluster = community_to_pkg[m.target_community]
         # A3: pick per-symbol dest file by counting graph edges
@@ -420,7 +445,7 @@ def plan(view: GraphView, repo_root: Path, graph_json_path: Path | None = None) 
     shim_map: dict[str, list[str]] = {}  # src → triggers
     for fc in view.file_clusters:
         for src in fc.files:
-            triggers = _shim_triggers(src, repo_root, all_exports, pyproject_refs)
+            triggers = _shim_triggers(src, repo_root, all_exports, pyproject_refs, source_map=source_map)
             if triggers:
                 if src not in shim_map:
                     shim_map[src] = triggers
@@ -456,6 +481,7 @@ def plan(view: GraphView, repo_root: Path, graph_json_path: Path | None = None) 
         symbol_moves=symbol_moves,
         shim_candidates=shim_candidates,
         splitting_candidates=splitting_candidates,
+        blocked_moves=blocked_moves,
     )
 
 

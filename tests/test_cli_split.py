@@ -62,7 +62,7 @@ def test_split_apply_loads_existing_plan_and_runs_validator(
     out.write_text(SplitPlan(splits=[], triggers=[]).model_dump_json(), encoding="utf-8")
     seen: dict[str, object] = {}
 
-    def fake_apply_split_plan(plan, repo_root, *, only_approved):
+    def fake_apply_split_plan(plan, repo_root, *, only_approved, source_map=None):
         seen["only_approved"] = only_approved
         return ApplyResult(
             applied=[
@@ -122,7 +122,7 @@ def test_split_apply_approve_splits_marks_plan_before_applying(
     out.write_text(_split_plan().model_dump_json(), encoding="utf-8")
     seen: dict[str, object] = {}
 
-    def fake_apply_split_plan(plan, repo_root, *, only_approved):
+    def fake_apply_split_plan(plan, repo_root, *, only_approved, source_map=None):
         seen["approved"] = plan.splits[0].approved
         return ApplyResult(
             applied=[
@@ -158,7 +158,7 @@ def test_split_apply_review_splits_can_decline_move(
     out.write_text(_split_plan().model_dump_json(), encoding="utf-8")
     seen: dict[str, object] = {}
 
-    def fake_apply_split_plan(plan, repo_root, *, only_approved):
+    def fake_apply_split_plan(plan, repo_root, *, only_approved, source_map=None):
         seen["approved"] = plan.splits[0].approved
         return ApplyResult(
             applied=[

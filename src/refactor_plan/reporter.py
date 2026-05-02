@@ -107,6 +107,21 @@ def _format_symbol_moves_table(plan: RefactorPlan) -> str:
     return "\n".join(lines)
 
 
+def _format_blocked_moves_table(plan: RefactorPlan) -> str:
+    """Format blocked moves as a markdown table."""
+    lines: list[str] = []
+
+    if plan.blocked_moves:
+        lines.append("\n## Blocked Moves\n")
+        lines.append("| Symbol | Source File | Target Community | Reason |")
+        lines.append("|--------|-----------|-----------------|--------|")
+        for bm in plan.blocked_moves:
+            lines.append(f"| {bm.label} | {bm.src_file} | {bm.target_community} | {bm.reason} |")
+        lines.append("")
+
+    return "\n".join(lines)
+
+
 def _format_shim_candidates_table(plan: RefactorPlan) -> str:
     """Format shim candidates as a markdown table."""
     lines = ["## Shim candidates", ""]
@@ -239,6 +254,7 @@ def render_dry_run_report_text(view: GraphView, plan: RefactorPlan) -> str:
         _format_clusters_table(plan),
         _format_file_moves_table(plan),
         _format_symbol_moves_table(plan),
+        _format_blocked_moves_table(plan),
         _format_shim_candidates_table(plan),
         _format_splitting_candidates(plan),
         _format_god_nodes(view),

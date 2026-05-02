@@ -46,6 +46,19 @@ from refactor_plan.planner import RefactorPlan
 
 log = logging.getLogger(__name__)
 
+
+def _safe_resource(project, path, *, resource_type=None):
+    """Resolve a path to a rope resource, returning (resource, error_msg).
+
+    Returns (resource, None) on success, (None, error_string) on failure.
+    """
+    try:
+        r = libutils.path_to_resource(project, str(path), type=resource_type)
+        return r, None
+    except Exception as e:
+        return None, f"rope cannot resolve {path}: {e}"
+
+
 # ---------------------------------------------------------------------------
 # Public models
 # ---------------------------------------------------------------------------
@@ -76,28 +89,20 @@ class ApplyResult(BaseModel):
 def _resolve_src_path(repo_root: Path, src: str) -> Optional[Path]:
     """Resolve a plan src path to an existing absolute path.
 
-    The plan's src is relative to wherever graphify was run, which may differ
-    from repo_root (e.g., when using a fixture copy in tests).  Strategy:
+    Strategy:
     1. Try repo_root / src directly.
-    2. Try repo_root joined with just the last N components, decreasing.
-    3. Try repo_root.rglob for the basename (picks the first match).
+    2. Try repo_root joined with progressively shorter suffixes.
+    No rglob fallback — basename matches are ambiguous and dangerous.
     """
     direct = repo_root / src
     if direct.exists():
         return direct
 
-    # Strip leading components and try progressively shorter suffixes
     parts = Path(src).parts
     for start in range(1, len(parts)):
         candidate = repo_root.joinpath(*parts[start:])
         if candidate.exists():
             return candidate
-
-    # Last resort: rglob by basename
-    basename = Path(src).name
-    matches = list(repo_root.rglob(basename))
-    if matches:
-        return matches[0]
 
     return None
 
@@ -359,7 +364,8 @@ class _CrossClusterImportRewriter(cst.CSTTransformer):
         dest_rel = dest_path.relative_to(repo_root).as_posix()
         src_rel = dest_to_src.get(dest_rel)
         if src_rel is not None:
-            self.original_src_pkg = Path(src_rel).parts[-2]  # e.g. "messy_pkg"
+            src_parts = Path(src_rel).parts
+            self.original_src_pkg = src_parts[-2] if len(src_parts) >= 2 else None
         else:
             self.original_src_pkg = None
 
@@ -688,6 +694,7 @@ def apply_plan(
     repo_root: Path,
     *,
     only_approved_symbols: bool = True,
+    source_map: dict[str, Path] | None = None,
 ) -> ApplyResult:
     """Translate plan into rope operations executed transactionally per-change.
 
@@ -698,6 +705,7 @@ def apply_plan(
     because rope rewrites imports (changing file content) when files are
     relocated, invalidating pre-computed offsets.
     """
+    repo_root = repo_root.resolve()
     applied: list[AppliedAction] = []
     escalations: list[Escalation] = []
     stray_deleted_files: dict[str, str] = {}  # {rel_path: original_content} for F4 deletions
@@ -716,7 +724,10 @@ def apply_plan(
     # Offsets will be recomputed after file moves to get current content.
     # ------------------------------------------------------------------
     for sm in symbol_moves_to_apply:
-        resolved = _resolve_src_path(repo_root, sm.src_file)
+        if source_map is not None and sm.src_file in source_map:
+            resolved = source_map[sm.src_file]
+        else:
+            resolved = _resolve_src_path(repo_root, sm.src_file)
         if resolved is None:
             continue
         # Run scope analysis to flag unresolvable accesses (string-form refs)
@@ -734,9 +745,14 @@ def apply_plan(
 
         # --- file moves ---
         for fm in plan.file_moves:
-            resolved_src = _resolve_src_path(repo_root, fm.src)
+            if source_map is not None and fm.src in source_map:
+                resolved_src = source_map[fm.src]
+            else:
+                resolved_src = _resolve_src_path(repo_root, fm.src)
             if resolved_src is None:
-                log.warning("Skipping file move: cannot resolve %s under %s", fm.src, repo_root)
+                err = f"source path not found: {fm.src}"
+                log.warning("file_move failed for %s: %s", fm.src, err)
+                escalations.append(Escalation(kind="move_error", symbol_id=fm.src, detail=err))
                 continue
 
             # A4: skip __init__.py files — rope's MoveModule treats an __init__.py
@@ -812,12 +828,16 @@ def apply_plan(
                 created_init_files.append(init_file)
 
             try:
-                src_resource = libutils.path_to_resource(project, str(resolved_src))
-                assert src_resource is not None, f"resource not found: {resolved_src}"
-                dest_resource = libutils.path_to_resource(
-                    project, str(dest_pkg_path), type="folder"
-                )
-                assert dest_resource is not None, f"resource not found: {dest_pkg_path}"
+                src_resource, err = _safe_resource(project, resolved_src)
+                if src_resource is None:
+                    log.warning("file_move failed for %s: %s", fm.src, err)
+                    escalations.append(Escalation(kind="move_error", symbol_id=fm.src, detail=err or "unknown"))
+                    continue
+                dest_resource, err = _safe_resource(project, dest_pkg_path, resource_type="folder")
+                if dest_resource is None:
+                    log.warning("file_move failed for %s: %s", fm.src, err)
+                    escalations.append(Escalation(kind="move_error", symbol_id=fm.src, detail=err or "unknown"))
+                    continue
                 mover = MoveModule(project, src_resource)
                 changes = mover.get_changes(dest_resource)
                 project.do(changes)
@@ -838,9 +858,9 @@ def apply_plan(
                 if src_basename != dest_basename:
                     intermediate_path = dest_pkg_path / src_basename
                     if intermediate_path.exists():
-                        moved_res = libutils.path_to_resource(
-                            project, str(intermediate_path)
-                        )
+                        moved_res, err = _safe_resource(project, intermediate_path)
+                        if moved_res is None:
+                            log.warning("rename failed for %s: %s", intermediate_path, err)
                         if moved_res is not None:
                             placeholder_stem = Path(fm.dest).stem  # e.g. "mod_002"
                             renamer = Rename(project, moved_res, offset=None)
@@ -862,12 +882,9 @@ def apply_plan(
                 # Use fm.dest's basename (placeholder mod_MMM.py).
                 dest_file = dest_pkg_path / dest_basename
                 if dest_file.exists():
-                    try:
-                        dest_res = libutils.path_to_resource(project, str(dest_file))
-                        if dest_res is not None:
-                            affected_resources.append(dest_res)
-                    except Exception:
-                        pass
+                    dest_res, _ = _safe_resource(project, dest_file)
+                    if dest_res is not None:
+                        affected_resources.append(dest_res)
             except Exception as exc:
                 log.warning("file_move failed for %s: %s", fm.src, exc)
                 escalations.append(
@@ -949,12 +966,16 @@ def apply_plan(
                 dest_module_path.write_text("")
 
             try:
-                src_resource = libutils.path_to_resource(project, str(current_src))
-                assert src_resource is not None, f"resource not found: {current_src}"
+                src_resource, err = _safe_resource(project, current_src)
+                if src_resource is None:
+                    escalations.append(Escalation(kind="move_error", symbol_id=sm.symbol_id, detail=err or "unknown"))
+                    continue
                 # Re-resolve dest resource each iteration so rope sees post-prior-move
                 # content (A7 fix: prevents second move to same file from dropping first).
-                dest_resource = libutils.path_to_resource(project, str(dest_module_path))
-                assert dest_resource is not None, f"resource not found: {dest_module_path}"
+                dest_resource, err = _safe_resource(project, dest_module_path)
+                if dest_resource is None:
+                    escalations.append(Escalation(kind="move_error", symbol_id=sm.symbol_id, detail=err or "unknown"))
+                    continue
                 mover = create_move(project, src_resource, offset)
                 # create_move returns MoveGlobal | MoveMethod | MoveModule | MoveResource;
                 # for offsets at top-level defs we always get MoveGlobal, whose
@@ -974,12 +995,9 @@ def apply_plan(
                     )
                 )
                 if dest_module_path.exists():
-                    try:
-                        dest_res = libutils.path_to_resource(project, str(dest_module_path))
-                        if dest_res is not None:
-                            affected_resources.append(dest_res)
-                    except Exception:
-                        pass
+                    dest_res, _ = _safe_resource(project, dest_module_path)
+                    if dest_res is not None:
+                        affected_resources.append(dest_res)
             except Exception as exc:
                 log.warning("symbol_move failed for %s: %s", sm.label, exc)
                 escalations.append(

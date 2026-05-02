@@ -24,6 +24,7 @@ from refactor_plan.cleaner import (
     save_dead_code_report,
 )
 from refactor_plan.cluster_view import build_view, load_graph
+from refactor_plan.graph_bridge import ensure_graph, normalize_source_files
 from refactor_plan.namer import RenameMap, name_clusters as propose_rename_map
 from refactor_plan.namer import write_rename_map
 from refactor_plan.planner import RefactorPlan
@@ -63,13 +64,6 @@ def _split_plan_path(repo_root: Path) -> Path:
 def _rename_map_path(repo_root: Path) -> Path:
     return _refactor_dir(repo_root) / "rename_map.json"
 
-
-def _require_graph(repo_root: Path) -> Path:
-    graph_path = _graph_path(repo_root)
-    if not graph_path.exists():
-        typer.echo("missing .refactor_plan/graph.json", err=True)
-        raise typer.Exit(code=1)
-    return graph_path
 
 
 def _load_plan(repo_root: Path) -> RefactorPlan:
@@ -290,9 +284,10 @@ def _apply_rename_map(rename_map: RenameMap, repo_root: Path) -> ApplyResult:
 @app.command()
 def analyze(repo: Path = typer.Argument(..., help="Path to repository")) -> None:
     """Build view, plan, and dry-run structure report."""
-    graph_path = _require_graph(repo)
+    graph_path = ensure_graph(repo)
+    source_map = normalize_source_files(graph_path, repo)
     view = build_view(graph_path)
-    refactor_plan = build_plan(view, repo, graph_path)
+    refactor_plan = build_plan(view, repo, graph_path, source_map=source_map)
 
     plan_path = _plan_path(repo)
     plan_path.parent.mkdir(parents=True, exist_ok=True)
@@ -322,10 +317,12 @@ def apply_command(
     ),
 ) -> None:
     """Apply approved file and symbol moves, then validate."""
-    refactor_plan = _load_plan(repo)
     if approve_symbols and review_symbols:
         typer.echo("choose only one of --approve-symbols or --review-symbols", err=True)
         raise typer.Exit(code=1)
+    refactor_plan = _load_plan(repo)
+    graph_path = ensure_graph(repo)
+    source_map = normalize_source_files(graph_path, repo)
     if approve_symbols or review_symbols:
         approved = _approve_symbol_moves(
             refactor_plan,
@@ -334,7 +331,7 @@ def apply_command(
         )
         _save_plan(refactor_plan, repo)
         typer.echo(f"approved {approved} symbol moves")
-    result = apply_plan(refactor_plan, repo, only_approved_symbols=True)
+    result = apply_plan(refactor_plan, repo, only_approved_symbols=True, source_map=source_map)
     _validate_or_exit(repo, result)
     typer.echo(f"applied {len(result.applied)} actions; validation passed")
 
@@ -355,7 +352,8 @@ def split_command(
     ),
 ) -> None:
     """Build or apply the splitter plan."""
-    graph_path = _require_graph(repo)
+    graph_path = ensure_graph(repo)
+    source_map = normalize_source_files(graph_path, repo)
     if approve_splits and review_splits:
         typer.echo("choose only one of --approve-splits or --review-splits", err=True)
         raise typer.Exit(code=1)
@@ -365,7 +363,7 @@ def split_command(
     else:
         view = build_view(graph_path)
         graph = load_graph(graph_path)
-        split_plan = build_split_plan(view, graph, repo)
+        split_plan = build_split_plan(view, graph, repo, source_map=source_map)
         _write_split_plan(split_plan, repo)
 
     if not apply_:
@@ -380,7 +378,7 @@ def split_command(
         )
         _write_split_plan(split_plan, repo)
         typer.echo(f"approved {approved} split moves")
-    result = apply_split_plan(split_plan, repo, only_approved=True)
+    result = apply_split_plan(split_plan, repo, only_approved=True, source_map=source_map)
     _validate_or_exit(repo, result)
     typer.echo(f"applied {len(result.applied)} split actions; validation passed")
 
@@ -402,7 +400,8 @@ def clean_command(
     ),
 ) -> None:
     """Build or apply the dead-code report."""
-    graph_path = _require_graph(repo)
+    graph_path = ensure_graph(repo)
+    source_map = normalize_source_files(graph_path, repo)
     if approve_deletions and review_deletions:
         typer.echo(
             "choose only one of --approve-deletions or --review-deletions",
@@ -420,7 +419,7 @@ def clean_command(
     else:
         view = build_view(graph_path)
         graph = load_graph(graph_path)
-        report = build_dead_code_report(view, graph, repo)
+        report = build_dead_code_report(view, graph, repo, source_map=source_map)
         save_dead_code_report(report, repo)
         md_path = _refactor_dir(repo) / "DEAD_CODE_REPORT.md"
         md_path.write_text(render_dead_code_report_md(report), encoding="utf-8")
@@ -437,7 +436,7 @@ def clean_command(
         )
         save_dead_code_report(report, repo)
         typer.echo(f"approved {approved} deletions")
-    result = apply_dead_code_report(report, repo, confirmed=True)
+    result = apply_dead_code_report(report, repo, confirmed=True, source_map=source_map)
     _validate_or_exit(repo, result)
     typer.echo(f"applied {len(result.applied)} clean actions; validation passed")
 
@@ -448,7 +447,8 @@ def name_command(
     apply_: bool = typer.Option(False, "--apply", help="Apply rename_map.json"),
 ) -> None:
     """Write or apply the semantic rename map."""
-    graph_path = _require_graph(repo)
+    graph_path = ensure_graph(repo)
+    source_map = normalize_source_files(graph_path, repo)  # noqa: F841 — available for future use
     refactor_plan = _load_plan(repo)
 
     rename_path = _rename_map_path(repo)

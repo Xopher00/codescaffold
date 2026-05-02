@@ -24,6 +24,7 @@ from refactor_plan.applicator.rope_runner import (
     _is_residue,
     _ensure_future_annotations,
     _rewrite_cross_cluster_imports,
+    _CrossClusterImportRewriter,
 )
 
 FIXTURE_GRAPH = (
@@ -859,4 +860,197 @@ def test_rewrite_cross_cluster_imports_idempotent(tmp_path):
     changed_second = _rewrite_cross_cluster_imports(dest_file, tmp_path, src_to_dest)
     assert changed_second is False, (
         f"Expected second call to be a no-op; content after second call:\n{dest_file.read_text()}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Regression: _CrossClusterImportRewriter with various source path depths
+# ---------------------------------------------------------------------------
+
+
+def test_cross_cluster_rewriter_root_level_module(tmp_path):
+    """Regression: root-level source module (1 path component) must not IndexError.
+
+    When dest_to_src maps to a file like 'utils.py' (no parent package),
+    Path('utils.py').parts has only 1 element.  The old code used parts[-2]
+    unconditionally, causing an IndexError.  The fix guards with a length check
+    and sets original_src_pkg to None.
+    """
+    (tmp_path / "pkg_001").mkdir()
+    (tmp_path / "pkg_001" / "__init__.py").touch()
+    (tmp_path / "pkg_001" / "mod_001.py").write_text("# placeholder\n")
+
+    rewriter = _CrossClusterImportRewriter(
+        dest_path=tmp_path / "pkg_001" / "mod_001.py",
+        repo_root=tmp_path,
+        src_module_to_dest_module={"utils": "pkg_001.mod_001"},
+        dest_to_src={"pkg_001/mod_001.py": "utils.py"},
+        symbol_name_to_dest={},
+    )
+
+    assert rewriter.original_src_pkg is None, (
+        f"Expected original_src_pkg=None for root-level module, got {rewriter.original_src_pkg!r}"
+    )
+
+
+def test_cross_cluster_rewriter_src_layout_module(tmp_path):
+    """src-layout source path (3 components) resolves to the penultimate directory.
+
+    For 'src/mylib/core.py', parts = ('src', 'mylib', 'core.py'), and
+    parts[-2] == 'mylib'.
+    """
+    (tmp_path / "pkg_001").mkdir()
+    (tmp_path / "pkg_001" / "__init__.py").touch()
+    (tmp_path / "pkg_001" / "mod_001.py").write_text("# placeholder\n")
+
+    rewriter = _CrossClusterImportRewriter(
+        dest_path=tmp_path / "pkg_001" / "mod_001.py",
+        repo_root=tmp_path,
+        src_module_to_dest_module={"mylib.core": "pkg_001.mod_001"},
+        dest_to_src={"pkg_001/mod_001.py": "src/mylib/core.py"},
+        symbol_name_to_dest={},
+    )
+
+    assert rewriter.original_src_pkg == "mylib", (
+        f"Expected original_src_pkg='mylib', got {rewriter.original_src_pkg!r}"
+    )
+
+
+def test_cross_cluster_rewriter_deeply_nested_module(tmp_path):
+    """Deeply nested source path (4 components) resolves to the penultimate directory.
+
+    For 'a/b/c/deep.py', parts = ('a', 'b', 'c', 'deep.py'), and
+    parts[-2] == 'c'.
+    """
+    (tmp_path / "pkg_001").mkdir()
+    (tmp_path / "pkg_001" / "__init__.py").touch()
+    (tmp_path / "pkg_001" / "mod_001.py").write_text("# placeholder\n")
+
+    rewriter = _CrossClusterImportRewriter(
+        dest_path=tmp_path / "pkg_001" / "mod_001.py",
+        repo_root=tmp_path,
+        src_module_to_dest_module={"c.deep": "pkg_001.mod_001"},
+        dest_to_src={"pkg_001/mod_001.py": "a/b/c/deep.py"},
+        symbol_name_to_dest={},
+    )
+
+    assert rewriter.original_src_pkg == "c", (
+        f"Expected original_src_pkg='c', got {rewriter.original_src_pkg!r}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# _safe_resource / error handling regression tests
+# ---------------------------------------------------------------------------
+
+
+from refactor_plan.planner import (
+    FileMove,
+    ClusterAlloc,
+    RefactorPlan,
+)
+
+
+def test_file_move_nonexistent_src_escalates(tmp_path):
+    """_safe_resource: FileMove with non-existent src does not crash and records escalation.
+
+    When the source file does not exist, apply_plan must return an escalation
+    with kind='move_error' rather than raising an exception.
+    """
+    plan = RefactorPlan(
+        file_moves=[
+            FileMove(
+                src="nonexistent/gone.py",
+                dest="pkg_001/mod_001.py",
+                cluster="pkg_001",
+                cohesion=0.5,
+            )
+        ],
+        symbol_moves=[],
+        shim_candidates=[],
+        splitting_candidates=[],
+        clusters=[
+            ClusterAlloc(
+                name="pkg_001",
+                community_id=0,
+                files=["nonexistent/gone.py"],
+                cohesion=0.5,
+            )
+        ],
+        blocked_moves=[],
+    )
+
+    result = apply_plan(plan, tmp_path)
+
+    # Must not crash — result is always an ApplyResult
+    assert isinstance(result, ApplyResult)
+
+    # The non-existent src should produce a move_error escalation
+    move_errors = [e for e in result.escalations if e.kind == "move_error"]
+    assert len(move_errors) >= 1, (
+        f"Expected at least 1 move_error escalation for non-existent src; "
+        f"escalations: {result.escalations}"
+    )
+    assert "gone.py" in move_errors[0].symbol_id or "nonexistent/gone.py" == move_errors[0].symbol_id, (
+        f"Expected symbol_id to reference the missing file; got: {move_errors[0].symbol_id}"
+    )
+
+
+def test_file_move_dest_folder_created_on_fly(tmp_path):
+    """apply_plan: FileMove succeeds when dest folder does not yet exist.
+
+    The applicator must create the dest package directory (with __init__.py)
+    before calling rope's MoveModule, so the folder resource resolves correctly.
+    This test documents and asserts the existing behavior.
+    """
+    # Create a real source file with valid Python content
+    src_dir = tmp_path / "src_pkg"
+    src_dir.mkdir()
+    (src_dir / "__init__.py").write_text("")
+    (src_dir / "mod.py").write_text("def hello():\n    return 'hi'\n")
+
+    plan = RefactorPlan(
+        file_moves=[
+            FileMove(
+                src="src_pkg/mod.py",
+                dest="pkg_001/mod_001.py",
+                cluster="pkg_001",
+                cohesion=0.8,
+            )
+        ],
+        symbol_moves=[],
+        shim_candidates=[],
+        splitting_candidates=[],
+        clusters=[
+            ClusterAlloc(
+                name="pkg_001",
+                community_id=0,
+                files=["src_pkg/mod.py"],
+                cohesion=0.8,
+            )
+        ],
+        blocked_moves=[],
+    )
+
+    result = apply_plan(plan, tmp_path)
+
+    assert isinstance(result, ApplyResult)
+
+    # Dest folder must have been created
+    dest_pkg = tmp_path / "pkg_001"
+    assert dest_pkg.exists(), "Expected pkg_001/ to be created by apply_plan"
+    assert (dest_pkg / "__init__.py").exists(), "Expected pkg_001/__init__.py to exist"
+
+    # Dest file must exist (either as mod_001.py after rename, or the intermediate name)
+    dest_file = tmp_path / "pkg_001" / "mod_001.py"
+    intermediate = tmp_path / "pkg_001" / "mod.py"
+    assert dest_file.exists() or intermediate.exists(), (
+        f"Expected moved file at {dest_file} or {intermediate}; "
+        f"escalations: {result.escalations}"
+    )
+
+    # No move_error escalations
+    move_errors = [e for e in result.escalations if e.kind == "move_error"]
+    assert move_errors == [], (
+        f"Expected no move_error escalations; got: {move_errors}"
     )

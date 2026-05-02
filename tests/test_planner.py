@@ -15,6 +15,7 @@ from pathlib import Path
 import pytest
 
 from refactor_plan.cluster_view import build_view
+from refactor_plan.graph_bridge import normalize_source_files
 from refactor_plan.planner import (
     RefactorPlan,
     plan,
@@ -38,7 +39,8 @@ def view():
 
 @pytest.fixture(scope="module")
 def refactor_plan(view):
-    return plan(view, FIXTURE_REPO, FIXTURE_GRAPH)
+    source_map = normalize_source_files(FIXTURE_GRAPH, FIXTURE_REPO)
+    return plan(view, FIXTURE_REPO, FIXTURE_GRAPH, source_map=source_map)
 
 
 # ---------------------------------------------------------------------------
@@ -146,8 +148,9 @@ def test_splitting_candidates_are_sorted(refactor_plan):
 # ---------------------------------------------------------------------------
 
 def test_plan_is_deterministic(view):
-    plan_a = plan(view, FIXTURE_REPO, FIXTURE_GRAPH)
-    plan_b = plan(view, FIXTURE_REPO, FIXTURE_GRAPH)
+    source_map = normalize_source_files(FIXTURE_GRAPH, FIXTURE_REPO)
+    plan_a = plan(view, FIXTURE_REPO, FIXTURE_GRAPH, source_map=source_map)
+    plan_b = plan(view, FIXTURE_REPO, FIXTURE_GRAPH, source_map=source_map)
     assert plan_a.model_dump() == plan_b.model_dump()
 
 
@@ -315,8 +318,9 @@ def test_no_dest_inherits_source_filename(refactor_plan):
 
 def test_mod_allocation_deterministic(view):
     """F1: Calling plan() twice must produce identical dest/dest_file strings."""
-    plan_a = plan(view, FIXTURE_REPO, FIXTURE_GRAPH)
-    plan_b = plan(view, FIXTURE_REPO, FIXTURE_GRAPH)
+    source_map = normalize_source_files(FIXTURE_GRAPH, FIXTURE_REPO)
+    plan_a = plan(view, FIXTURE_REPO, FIXTURE_GRAPH, source_map=source_map)
+    plan_b = plan(view, FIXTURE_REPO, FIXTURE_GRAPH, source_map=source_map)
 
     a_file_dests = [fm.dest for fm in plan_a.file_moves]
     b_file_dests = [fm.dest for fm in plan_b.file_moves]
@@ -325,3 +329,87 @@ def test_mod_allocation_deterministic(view):
     a_sym_dests = [sm.dest_file for sm in plan_a.symbol_moves]
     b_sym_dests = [sm.dest_file for sm in plan_b.symbol_moves]
     assert a_sym_dests == b_sym_dests, "symbol_move dest_file strings differ between runs"
+
+
+# ---------------------------------------------------------------------------
+# Regression: missing target_community must not raise KeyError
+# ---------------------------------------------------------------------------
+
+import json
+import networkx as nx
+from networkx.readwrite import json_graph
+
+
+def test_planner_missing_target_community(tmp_path):
+    """When a misplaced symbol's target_community has no file-backed cluster,
+    the planner must not raise KeyError; it should record a BlockedMove instead."""
+
+    # Build a minimal graph: one file node (community 0), two function nodes.
+    # func_x is in community 0 (same as the file), func_y is in community 1
+    # (which has NO file node, so community_to_pkg won't contain it).
+    G = nx.Graph()
+    G.add_node(
+        "file_a_py",
+        label="a.py",
+        source_file="pkg/a.py",
+        community=0,
+        source_location="L1",
+    )
+    G.add_node(
+        "func_x",
+        label="func_x()",
+        source_file="pkg/a.py",
+        community=0,
+        source_location="L5",
+    )
+    G.add_node(
+        "func_y",
+        label="func_y()",
+        source_file="pkg/a.py",
+        community=1,
+        source_location="L10",
+    )
+
+    G.add_edge(
+        "file_a_py",
+        "func_x",
+        relation="contains",
+        confidence="EXTRACTED",
+        _src="file_a_py",
+        _tgt="func_x",
+        weight=1.0,
+        source_file="pkg/a.py",
+        source_location="L1",
+    )
+    G.add_edge(
+        "file_a_py",
+        "func_y",
+        relation="contains",
+        confidence="EXTRACTED",
+        _src="file_a_py",
+        _tgt="func_y",
+        weight=1.0,
+        source_file="pkg/a.py",
+        source_location="L1",
+    )
+
+    # Write graph.json
+    graph_json_path = tmp_path / "graph.json"
+    data = json_graph.node_link_data(G, edges="links")
+    graph_json_path.write_text(json.dumps(data))
+
+    # Create the source file on disk so shim/file resolution can find it
+    pkg_dir = tmp_path / "pkg"
+    pkg_dir.mkdir()
+    (pkg_dir / "__init__.py").write_text("")
+    (pkg_dir / "a.py").write_text("def func_x(): pass\ndef func_y(): pass\n")
+
+    # Build view and plan — must not raise KeyError
+    view = build_view(graph_json_path)
+    refactor_plan = plan(view, tmp_path, graph_json_path)
+
+    # The symbol in community 1 (no file cluster) should appear as a blocked move
+    assert len(refactor_plan.blocked_moves) == 1
+    bm = refactor_plan.blocked_moves[0]
+    assert bm.target_community == 1
+    assert bm.label == "func_y()"

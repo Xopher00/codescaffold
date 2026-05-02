@@ -99,6 +99,8 @@ def build_dead_code_report(
     view: GraphView,
     graph: nx.Graph,
     repo_root: Path,
+    *,
+    source_map: dict[str, Path] | None = None,
 ) -> DeadCodeReport:
     """Build a DeadCodeReport from a GraphView.
 
@@ -223,6 +225,7 @@ def apply_dead_code_report(
     repo_root: Path,
     *,
     confirmed: bool = False,
+    source_map: dict[str, Path] | None = None,
 ) -> ApplyResult:
     """Apply approved dead-symbol deletions via libCST RemovalSentinel.
 

@@ -22,6 +22,9 @@ def _write_empty_plan(repo: Path) -> None:
         splitting_candidates=[],
     )
     out.write_text(plan.model_dump_json(indent=2), encoding="utf-8")
+    # apply_command now calls _require_graph + normalize_source_files; provide a minimal graph.json
+    graph_out = out.parent / "graph.json"
+    graph_out.write_text('{"nodes": [], "links": []}', encoding="utf-8")
 
 
 def _write_symbol_plan(repo: Path) -> None:
@@ -45,6 +48,9 @@ def _write_symbol_plan(repo: Path) -> None:
         splitting_candidates=[],
     )
     out.write_text(plan.model_dump_json(indent=2), encoding="utf-8")
+    # apply_command now calls _require_graph + normalize_source_files; provide a minimal graph.json
+    graph_out = out.parent / "graph.json"
+    graph_out.write_text('{"nodes": [], "links": []}', encoding="utf-8")
 
 
 def _apply_result() -> ApplyResult:
@@ -74,7 +80,7 @@ def test_apply_calls_apply_plan_for_approved_symbols(
     _write_empty_plan(tmp_path)
     seen: dict[str, object] = {}
 
-    def fake_apply_plan(plan, repo_root, *, only_approved_symbols):
+    def fake_apply_plan(plan, repo_root, *, only_approved_symbols, source_map=None):
         seen["only_approved_symbols"] = only_approved_symbols
         seen["repo_root"] = repo_root
         return _apply_result()
@@ -154,7 +160,7 @@ def test_apply_approve_symbols_marks_plan_before_applying(
     _write_symbol_plan(tmp_path)
     seen: dict[str, object] = {}
 
-    def fake_apply_plan(plan, repo_root, *, only_approved_symbols):
+    def fake_apply_plan(plan, repo_root, *, only_approved_symbols, source_map=None):
         seen["approved"] = plan.symbol_moves[0].approved
         return _apply_result()
 
@@ -186,7 +192,7 @@ def test_apply_review_symbols_can_decline_move(
     _write_symbol_plan(tmp_path)
     seen: dict[str, object] = {}
 
-    def fake_apply_plan(plan, repo_root, *, only_approved_symbols):
+    def fake_apply_plan(plan, repo_root, *, only_approved_symbols, source_map=None):
         seen["approved"] = plan.symbol_moves[0].approved
         return _apply_result()
 

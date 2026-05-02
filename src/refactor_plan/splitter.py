@@ -96,7 +96,7 @@ def _pkg_name(community: int) -> str:
     return f"pkg_{community:03d}"
 
 
-def build_split_plan(view: GraphView, graph: nx.Graph, repo_root: Path) -> SplitPlan:
+def build_split_plan(view: GraphView, graph: nx.Graph, repo_root: Path, *, source_map: dict[str, Path] | None = None) -> SplitPlan:
     """Build a SplitPlan from a GraphView.
 
     Triggers: presence of `low_cohesion` or `bridge_node` entries in
@@ -224,6 +224,7 @@ def apply_split_plan(
     repo_root: Path,
     *,
     only_approved: bool = True,
+    source_map: dict[str, Path] | None = None,
 ) -> ApplyResult:
     """Apply approved splits via sequenced rope MoveGlobal.
 

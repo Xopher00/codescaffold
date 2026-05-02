@@ -71,7 +71,7 @@ def test_clean_apply_confirmed_uses_existing_report_and_validates(
     report_path.write_text(_report(approved=True).model_dump_json(), encoding="utf-8")
     seen: dict[str, object] = {}
 
-    def fake_apply_dead_code_report(report, repo_root, *, confirmed):
+    def fake_apply_dead_code_report(report, repo_root, *, confirmed, source_map=None):
         seen["approved"] = report.symbols[0].approved
         seen["confirmed"] = confirmed
         return ApplyResult(
@@ -135,7 +135,7 @@ def test_clean_apply_confirmed_approve_deletions_marks_report(
     report_path.write_text(_report(approved=False).model_dump_json(), encoding="utf-8")
     seen: dict[str, object] = {}
 
-    def fake_apply_dead_code_report(report, repo_root, *, confirmed):
+    def fake_apply_dead_code_report(report, repo_root, *, confirmed, source_map=None):
         seen["approved"] = report.symbols[0].approved
         return ApplyResult(
             applied=[
@@ -174,7 +174,7 @@ def test_clean_apply_confirmed_review_deletions_can_decline(
     report_path.write_text(_report(approved=False).model_dump_json(), encoding="utf-8")
     seen: dict[str, object] = {}
 
-    def fake_apply_dead_code_report(report, repo_root, *, confirmed):
+    def fake_apply_dead_code_report(report, repo_root, *, confirmed, source_map=None):
         seen["approved"] = report.symbols[0].approved
         return ApplyResult(
             applied=[

@@ -38,13 +38,17 @@ def test_analyze_writes_plan_and_report(repo: Path) -> None:
     assert "STRUCTURE_REPORT" in report_path.read_text()
 
 
-def test_analyze_fails_without_graph_json(repo: Path) -> None:
-    (repo / ".refactor_plan" / "graph.json").unlink()
+def test_analyze_generates_graph_when_missing(repo: Path) -> None:
+    """When graph.json is absent, ensure_graph auto-generates it before analysis."""
+    graph_path = repo / ".refactor_plan" / "graph.json"
+    graph_path.unlink()
+    assert not graph_path.exists()
 
     result = runner.invoke(app, ["analyze", str(repo)])
 
-    assert result.exit_code == 1
-    assert "missing .refactor_plan/graph.json" in result.output
+    assert result.exit_code == 0, result.output
+    assert graph_path.exists()
+    assert "wrote refactor_plan.json" in result.stdout
 
 
 def test_help_lists_only_wave_c_subcommands() -> None:
