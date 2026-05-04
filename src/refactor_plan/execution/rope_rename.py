@@ -111,8 +111,13 @@ def rename_module(
     module_path: Path,
     new_name: str,
     dry_run: bool = False,
+    project: rp.Project | None = None,
 ) -> AppliedAction | Escalation:
-    """Rename a module file or package directory, updating all imports."""
+    """Rename a module file or package directory, updating all imports.
+
+    Pass a rope Project to reuse across multiple renames (avoids O(n) project creation).
+    Caller is responsible for closing a passed-in project.
+    """
     if not module_path.exists():
         return Escalation(
             kind=MoveKind.FILE,
@@ -140,7 +145,9 @@ def rename_module(
 
     old_module = _to_module_name(resource_path, repo_root)
 
-    project = _make_project(repo_root)
+    owns_project = project is None
+    if owns_project:
+        project = _make_project(repo_root)
     try:
         resource = libutils.path_to_resource(project, str(resource_path))
         renamer = Rename(project, resource)
@@ -149,7 +156,8 @@ def rename_module(
         if not dry_run:
             project.do(changes)
     except RefactoringError as exc:
-        project.close()
+        if owns_project:
+            project.close()
         return Escalation(
             kind=kind,
             source=str(module_path),
@@ -158,7 +166,8 @@ def rename_module(
             strategy_attempted=MoveStrategy.ROPE,
         )
     except Exception as exc:
-        project.close()
+        if owns_project:
+            project.close()
         return Escalation(
             kind=kind,
             source=str(module_path),
@@ -167,7 +176,8 @@ def rename_module(
             strategy_attempted=MoveStrategy.ROPE,
         )
     finally:
-        project.close()
+        if owns_project:
+            project.close()
 
     # Rope reliably renames the file but does not find import sites in
     # src-layout repos. Use LibCST to rewrite all cross-repo imports.

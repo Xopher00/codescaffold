@@ -104,7 +104,7 @@ def _run_file_moves(
             applied.append(action)
             dest_dirs.add(dest_pkg_abs)
 
-    if applied:
+    if applied and not dry_run:
         repo_root = Path(project.root.real_path)
         normalize_package_imports(repo_root)
 

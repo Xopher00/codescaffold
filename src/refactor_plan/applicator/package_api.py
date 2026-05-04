@@ -339,26 +339,37 @@ def _prepend_underscores(repo_root: Path, externally_imported: set[str]) -> list
     externally_imported is the set of dotted module names that DO have
     external importers (collected during pass 1). Everything else in
     a package is private and gets the _ prefix.
-    """
-    from refactor_plan.execution import rename_module
 
+    Only operates within the detected source root (e.g. src/) — never
+    touches tests, fixtures, or top-level scripts.
+    """
+    from refactor_plan.execution.rope_rename import _make_project, rename_module
+    from refactor_plan.layout import detect_layout
+
+    layout = detect_layout(repo_root)
+    src_root = layout.source_root
     touched: list[str] = []
 
-    for init_path in sorted(repo_root.rglob("__init__.py")):
-        pkg_dir = init_path.parent
+    project = _make_project(repo_root)
+    try:
+        for init_path in sorted(src_root.rglob("__init__.py")):
+            pkg_dir = init_path.parent
 
-        for mod_file in sorted(pkg_dir.glob("*.py")):
-            if mod_file.name == "__init__.py":
-                continue
-            if mod_file.stem.startswith("_"):
-                continue
-            mod_dotted = _file_to_module(mod_file, repo_root)
-            if mod_dotted in externally_imported:
-                continue
-            result = rename_module(repo_root, mod_file, f"_{mod_file.stem}")
-            if hasattr(result, "dest"):
-                touched.append(result.dest)
-                touched.extend(getattr(result, "files_touched", []))
+            for mod_file in sorted(pkg_dir.glob("*.py")):
+                if mod_file.name == "__init__.py":
+                    continue
+                if mod_file.stem.startswith("_"):
+                    continue
+                mod_dotted = _file_to_module(mod_file, repo_root)
+                if mod_dotted in externally_imported:
+                    continue
+                result = rename_module(repo_root, mod_file, f"_{mod_file.stem}", project=project)
+                if hasattr(result, "dest"):
+                    touched.append(result.dest)
+                    touched.extend(getattr(result, "files_touched", []))
+                project.validate()
+    finally:
+        project.close()
 
     return touched
 
