@@ -137,6 +137,80 @@ analyze
 
 Contracts should exist early enough to protect latent structure, but they must also be refreshable after moves and renames. Treat contracts as generated, maintainable artifacts, not one-time static files.
 
+## Contract stack architecture (design target)
+
+The tool needs a **contract stack** where each layer has a distinct role:
+
+| Layer | Role | Contract meaning |
+|---|---|---|
+| Graph JSON | Evidence/model | "This refactor is justified by this graph snapshot." |
+| Rope / LibCST | Mechanical executor | "Only these mechanical changes are allowed." |
+| Import-linter | Architecture validator | "Dependency boundaries must still hold after the change." |
+| Tests / import probes | Behavioral safety gate | "The project still works." |
+| Audit JSON | Replay/explanation | "This is what changed, why, and under which evidence." |
+
+**Core principle:**
+```
+Graph JSON proposes/evidences.
+Agent approves.
+Rope applies.
+Import-linter/tests enforce.
+Audit records.
+```
+
+### Contract stack rules
+
+**Graph JSON is observation, not instruction.** The graph file must be hashed and referenced by the plan. Stale graph data must be rejected if the repo commit has changed since the snapshot.
+
+**Refactor contract = explicit allowed change surface.** Before applying anything, the agent's decision becomes a strict contract:
+- `allowed_operations` — typed mechanical operations only (move_file, rename_symbol, import_update)
+- `forbidden_operations` — no shims, no behavior rewrites, no test deletions unless explicitly allowed
+- `blocked_paths` — pyproject.toml, fixtures, README never touched
+- `validation` — which checks must pass before merge is allowed
+
+Anything outside the contract is rejected. This is how Claude-style sprawl is stopped.
+
+**Rope diff classification.** After Rope applies, classify the diff. Allowed: renamed file, changed import path, changed `__init__.py` export, changed docstring reference. Blocking: changed function body, added shim, deleted unrelated file.
+
+**Import-linter has two contract classes:**
+- *Durable contracts* — permanent architecture rules committed to the repo
+- *Sandbox contracts* — provisional rules generated for a specific refactor, not committed until agent/human decides they're permanent
+
+Generated contracts must start provisional. Graph cluster → provisional rule → apply in sandbox → run linter → decide if it becomes durable.
+
+**Graph-delta contracts.** After the refactor, recompute the graph and compare before/after. The contract declares expected structural improvements (edges removed, cycles not introduced, centrality not increased). The tool must report whether the graph changed in the intended direction — not just whether tests passed.
+
+### Full enforcement pipeline
+
+```
+1. Capture baseline — git commit hash, graph JSON hash, import-linter baseline
+2. Agent selects candidate — based on graph evidence, explicit approved moves only
+3. Build refactor contract — allowed ops, forbidden ops, expected graph delta, import-linter rules
+4. Apply in sandbox — Rope/LibCST only, no broad LLM editing
+5. Diff classification — reject unrelated edits, reject behavior edits, reject unapproved shims
+6. Validate — imports resolve, tests pass, import-linter passes, graph delta matches expectation
+7. Audit — record evidence, operations, diff summary, validation results, accepted/rejected status
+8. Merge or discard sandbox
+```
+
+A refactor may only land if:
+- approved as an explicit typed operation
+- only changed the allowed surface
+- preserved import/test validity
+- satisfied architecture constraints
+- graph delta matches stated intent
+
+### Current gap against this design
+
+The current tool does steps 4 (Rope apply), 6 (tests only), and 8 (merge/discard). Missing:
+- Step 1: graph hash not captured; plan does not reference graph snapshot
+- Step 3: no explicit forbidden_operations or blocked_paths
+- Step 5: no diff classification — normalize runs unconditionally and can introduce unintended edits
+- Step 6: import-linter not in validation chain; MCP server startup smoke test not in validation chain; graph-delta comparison does not exist
+- Step 7: no audit JSON with evidence, rationale, and graph delta
+
+---
+
 ## Priority 1 — fix package creation after moves ✓ DONE
 
 Implement explicit `__init__.py` creation for every destination package directory created by moves.
