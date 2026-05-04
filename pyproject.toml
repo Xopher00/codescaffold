@@ -9,7 +9,6 @@ description = "Graph-driven structural refactoring assistant"
 requires-python = ">=3.11"
 dependencies = [
   "networkx>=3.0",
-  "typer>=0.9",
   "pydantic>=2.0",
   "rope>=1.13",
   "libcst>=1.0",
@@ -22,7 +21,6 @@ dependencies = [
 dev = ["pytest>=8.0", "ruff>=0.6"]
 
 [project.scripts]
-refactor-plan = "refactor_plan.interface.cli:app"
 codescaffold-mcp = "refactor_plan.mcp_server:main"
 
 [tool.setuptools.packages.find]

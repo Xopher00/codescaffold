@@ -13,6 +13,7 @@ from graphify.cluster import cluster
 from graphify.export import to_json
 
 from refactor_plan.applicator.models import FileRef
+from refactor_plan.layout import detect_layout
 
 logger = logging.getLogger(__name__)
 
@@ -73,6 +74,8 @@ def normalize_source_files(G: nx.Graph, repo_root: Path) -> dict[str, Path]:
 
 def build_file_refs(G: nx.Graph, repo_root: Path) -> dict[str, FileRef]:
     source_files = normalize_source_files(G, repo_root)
+    layout = detect_layout(repo_root)
+    src_root = layout.source_root
     refs: dict[str, FileRef] = {}
 
     for sf, abs_path in source_files.items():
@@ -81,10 +84,11 @@ def build_file_refs(G: nx.Graph, repo_root: Path) -> dict[str, FileRef]:
         except ValueError:
             continue
 
-        module_path = rope_rel
-        if module_path.startswith("src/"):
-            module_path = module_path[len("src/"):]
-        module_path = module_path.replace("/", ".")
+        try:
+            rel_to_src = abs_path.relative_to(src_root)
+            module_path = str(rel_to_src).replace("/", ".")
+        except ValueError:
+            module_path = rope_rel.replace("/", ".")
         if module_path.endswith(".py"):
             module_path = module_path[:-3]
 

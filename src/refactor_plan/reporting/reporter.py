@@ -17,18 +17,78 @@ def render_dry_run_report(plan: dict, repo_root: str) -> str:
     file_moves: list[dict] = plan.get("file_moves", [])
     symbol_moves: list[dict] = plan.get("symbol_moves", [])
     communities: list = plan.get("communities", [])
+    surprising: list[dict] = plan.get("surprising_connections", [])
+    god_nodes: list[dict] = plan.get("god_nodes", [])
 
     lines: list[str] = []
     lines.append("# Structure Report\n")
 
+    pending_decisions: list[dict] = plan.get("pending_decisions", [])
+    placement_needed = sum(1 for d in pending_decisions if d.get("needs_placement"))
+
     lines.append("## Summary\n")
     lines.append(f"- Communities detected: {len(communities)}")
-    lines.append(f"- File moves proposed: {len(file_moves)}")
+    if pending_decisions:
+        lines.append(f"- Pending placement decisions: {placement_needed}")
+        lines.append(f"- Communities already well-placed: {len(pending_decisions) - placement_needed}")
+    else:
+        lines.append(f"- File moves approved: {len(file_moves)}")
     lines.append(f"- Symbol moves proposed: {len(symbol_moves)}")
     lines.append(f"- Repository root: `{repo_root}`\n")
 
-    if file_moves:
-        lines.append("## File Moves\n")
+    # Cluster analysis — cohesion scores and risk flags
+    clusters_with_cohesion = [c for c in communities if c.get("cohesion") is not None]
+    if clusters_with_cohesion:
+        lines.append("## Cluster Analysis\n")
+        lines.append("| Cluster | Files | Cohesion | Risk |")
+        lines.append("|---------|-------|----------|------|")
+        for c in sorted(clusters_with_cohesion, key=lambda x: x.get("cohesion", 1.0)):
+            cid = c.get("community_id", "?")
+            n_files = len(c.get("source_files", []))
+            coh = c.get("cohesion", 0.0)
+            risk = c.get("risk_level", "LOW")
+            pkg = c.get("proposed_package")
+            label = f"pkg_{cid:03d}" if pkg else f"comm_{cid} (no move)"
+            lines.append(f"| {label} | {n_files} | {coh:.2f} | {risk} |")
+        lines.append("")
+
+    # God nodes — most structurally central nodes in the graph
+    if god_nodes:
+        lines.append("## Core Abstractions (God Nodes)\n")
+        for g in god_nodes[:8]:
+            label = g.get("label", g.get("identifier", "?"))
+            sf = g.get("source_file", "")
+            edges = g.get("edges", "?")
+            lines.append(f"- **{label}** ({edges} edges) — `{sf}`")
+        lines.append("")
+
+    # Surprising connections — unexpected cross-community dependencies
+    if surprising:
+        lines.append("## Surprising Connections\n")
+        for s in surprising[:6]:
+            src = s.get("source_label", s.get("source", "?"))
+            dst = s.get("target_label", s.get("target", "?"))
+            rel = s.get("relation", "→")
+            conf = s.get("confidence_score", s.get("confidence", ""))
+            conf_str = f" (confidence: {conf:.2f})" if isinstance(conf, float) else ""
+            lines.append(f"- `{src}` **{rel}** `{dst}`{conf_str}")
+        lines.append("")
+
+    if pending_decisions:
+        lines.append("## Pending Decisions\n")
+        lines.append("Run `get_cluster_context` to see graph evidence and decide placements.\n")
+        lines.append("| Community | Files | Directories | Status |")
+        lines.append("|-----------|-------|-------------|--------|")
+        for d in pending_decisions:
+            cid = d.get("community_id", "?")
+            n_files = len(d.get("source_files", []))
+            dirs = d.get("current_dirs", {})
+            n_dirs = len(dirs)
+            status = "PLACEMENT NEEDED" if d.get("needs_placement") else "confirmed"
+            lines.append(f"| {cid} | {n_files} | {n_dirs} | {status} |")
+        lines.append("")
+    elif file_moves:
+        lines.append("## Approved File Moves\n")
         lines.append("| Source | Destination | Risk |")
         lines.append("|--------|-------------|------|")
         for m in file_moves:

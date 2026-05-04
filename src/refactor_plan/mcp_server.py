@@ -32,8 +32,14 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
-from refactor_plan.applicator.apply import apply_plan as do_apply_plan
+from refactor_plan.applicator.apply import (
+    apply_plan as do_apply_plan,
+    _ensure_package_inits,
+    _run_file_moves,
+    _run_import_rewrites,
+)
 from refactor_plan.applicator.models import AppliedAction, ApplyResult, Escalation
+from refactor_plan.layout import detect_layout
 from refactor_plan.applicator.name_apply import apply_rename_map as do_apply_rename_map
 from refactor_plan.applicator.rollback import rollback as do_rollback
 from refactor_plan.applicator.rope_rename import rename_module as do_rename_module
@@ -41,14 +47,21 @@ from refactor_plan.applicator.rope_rename import rename_symbol as do_rename_symb
 from refactor_plan.applicator.worktree import (
     commit_and_release,
     create_worktree,
+    create_worktree_from_branch,
     discard_worktree,
+    load_state,
+    save_state,
     translate_plan,
+)
+from refactor_plan.contracts.import_contracts import (
+    check_staleness,
+    generate_contracts as do_generate_contracts,
 )
 from refactor_plan.interface.cluster_view import build_view
 from refactor_plan.interface.graph_bridge import ensure_graph
 from refactor_plan.naming.docstringer import build_docstring_context, insert_docstring_text
 from refactor_plan.naming.namer import RenameEntry, RenameMap, build_naming_context
-from refactor_plan.planning.planner import RefactorPlan
+from refactor_plan.planning.planner import FileMoveProposal, RefactorPlan
 from refactor_plan.planning.planner import plan as build_plan
 from refactor_plan.planning.planner import write_plan
 from refactor_plan.reporting.reporter import render_dry_run_report, write_report
@@ -58,11 +71,12 @@ mcp = FastMCP(
     "codescaffold",
     instructions=(
         "Graph-driven structural refactoring tools. "
-        "Typical workflow: analyze → get_cluster_context (you name the clusters) → "
-        "apply_rename_map → merge_sandbox. "
-        "For ad-hoc work: rename → merge_sandbox. "
-        "apply_rename_map and rename default to sandbox=True: changes are validated "
-        "in a git worktree and committed to a branch for review before merging."
+        "Workflow: analyze → get_cluster_context (review graph evidence, decide placement "
+        "and names) → approve_moves → apply → apply_rename_map → merge_sandbox. "
+        "apply and apply_rename_map are chained: apply commits structural moves to a "
+        "branch; apply_rename_map builds on top of that branch and produces the final "
+        "merge-ready branch. Never merge the apply branch directly. "
+        "For ad-hoc renames: rename → merge_sandbox."
     ),
 )
 
@@ -156,9 +170,16 @@ def analyze(repo: str = "") -> str:
         "file_moves": [m.model_dump() for m in plan.file_moves],
         "symbol_moves": [m.model_dump() for m in plan.symbol_moves],
         "communities": [c.model_dump() for c in plan.clusters],
+        "surprising_connections": view.surprising_connections,
+        "god_nodes": view.god_nodes[:8],
     }
     report = render_dry_run_report(plan_dict, str(root))
     write_report(report, out / "STRUCTURE_REPORT.md")
+
+    # Refresh contracts whenever the plan is regenerated
+    layout = detect_layout(root)
+    do_generate_contracts(plan, view, graph_path, root, layout, force=False)
+
     return report
 
 
@@ -188,6 +209,153 @@ def rollback(repo: str = "") -> str:
 
 
 @mcp.tool()
+def approve_moves(moves_json: str, repo: str = "") -> str:
+    """Record model-approved file moves into the plan for the next apply.
+
+    moves_json — JSON array of move objects:
+      [{"source": "src/pkg/foo.py", "dest": "src/contracts/foo.py"}, ...]
+
+    Files not listed stay where they are.
+    Pass [] to clear previously approved moves.
+    Validates all sources exist and destinations are within source_root.
+    Writes approved file_moves to refactor_plan.json.
+    Call apply next to execute.
+    """
+    root = _repo(repo)
+    try:
+        raw_moves: list[dict] = json.loads(moves_json)
+    except json.JSONDecodeError as exc:
+        return f"Invalid JSON: {exc}"
+
+    plan = _load_plan(root)
+    layout = detect_layout(root)
+
+    if not raw_moves:
+        plan.file_moves = []
+        write_plan(plan, _plan_path(root))
+        return "Approved moves cleared."
+
+    proposals: list[FileMoveProposal] = []
+    errors: list[str] = []
+
+    for entry in raw_moves:
+        src = entry.get("source", "")
+        dest = entry.get("dest", "")
+        if not src or not dest:
+            errors.append(f"  Missing source or dest in: {entry}")
+            continue
+        src_path = (root / src).resolve() if not Path(src).is_absolute() else Path(src).resolve()
+        dest_path = (root / dest).resolve() if not Path(dest).is_absolute() else Path(dest).resolve()
+        if not src_path.exists():
+            errors.append(f"  Source not found: {src}")
+            continue
+        try:
+            dest_path.relative_to(layout.source_root.resolve())
+        except ValueError:
+            errors.append(f"  Destination outside source_root ({layout.source_root}): {dest}")
+            continue
+        proposals.append(FileMoveProposal(
+            source=str(src_path),
+            dest=str(dest_path),
+            dest_package=str(dest_path.parent),
+        ))
+
+    if errors:
+        return "Validation errors — no moves written:\n" + "\n".join(errors)
+
+    plan.file_moves = proposals
+    write_plan(plan, _plan_path(root))
+
+    placement_needed = sum(1 for d in plan.pending_decisions if d.needs_placement)
+    return (
+        f"{len(proposals)} move(s) approved and written to plan.\n"
+        f"Pending placement decisions: {placement_needed}\n"
+        "Call apply next to execute in a sandbox."
+    )
+
+
+@mcp.tool()
+def contracts(repo: str = "", force: bool = False) -> str:
+    """Generate or refresh .importlinter contracts from current graph structure.
+
+    Derives three contract types using grimp (real Python imports, not inferred):
+    - layers: topological ordering of packages by import direction (skipped if cycles exist)
+    - independence: packages with no imports between any pair
+    - forbidden: unexpected cross-cluster dependencies from surprising connections
+
+    Writes .importlinter at repo root with a provenance header.
+    Will NOT overwrite hand-edited files unless force=True.
+    Re-run after apply or apply_rename_map to refresh.
+    """
+    root = _repo(repo)
+    graph_path = ensure_graph(root)
+    view = build_view(graph_path)
+    plan = _load_plan(root)
+    layout = detect_layout(root)
+
+    artifact = do_generate_contracts(plan, view, graph_path, root, layout, force=force)
+
+    if artifact.skipped_reason:
+        return f"SKIPPED: {artifact.skipped_reason}"
+
+    lines = [f"Generated {len(artifact.contracts)} contract(s) → {artifact.config_path}"]
+    for spec in artifact.contracts:
+        if spec.contract_type == "independence":
+            lines.append(f"  independence: {', '.join(spec.modules)}")
+        elif spec.contract_type == "layers":
+            lines.append(f"  layers: {len(spec.layers)} levels")
+        elif spec.contract_type == "forbidden":
+            lines.append(f"  forbidden: {', '.join(spec.source_modules)} ✗→ {', '.join(spec.forbidden_modules)}")
+
+    if artifact.cycles_detected:
+        lines.append(f"\n  WARNING: {len(artifact.cycles_detected)} import cycle(s) detected — layers contract skipped.")
+        for s in artifact.cycle_break_suggestions[:5]:
+            lines.append(f"\n  Cycle {' → '.join(s.cycle + [s.cycle[0]])}")
+            lines.append(f"    Edge   : {s.edge}")
+            lines.append(f"    Cause  : {s.cause}")
+            lines.append(f"    Fix    : {s.suggestion}")
+
+    lines.append(f"\nGraph mtime: {artifact.graph_mtime_iso}")
+    lines.append("Run validate_contracts to check compliance.")
+    return "\n".join(lines)
+
+
+@mcp.tool()
+def validate_contracts(repo: str = "") -> str:
+    """Run import-linter to check .importlinter contracts.
+
+    Returns PASSED or FAILED with per-contract results.
+    Warns if contracts may be stale (graph changed since last generate_contracts).
+    Run contracts first if no .importlinter file exists.
+    """
+    root = _repo(repo)
+    config_path = root / ".importlinter"
+    graph_path = ensure_graph(root)
+
+    if not config_path.exists():
+        return "No .importlinter found — run contracts first."
+
+    is_stale, staleness_reason = check_staleness(config_path, graph_path)
+
+    result = subprocess.run(
+        ["python", "-m", "importlinter", "--config", str(config_path)],
+        capture_output=True,
+        text=True,
+        cwd=str(root),
+    )
+
+    status = "PASSED" if result.returncode == 0 else "FAILED"
+    lines = [status]
+    if is_stale:
+        lines.append(f"  WARNING: {staleness_reason}")
+    if result.stdout:
+        lines.append(result.stdout[:1500])
+    if result.returncode != 0 and result.stderr:
+        lines.append(result.stderr[:500])
+    return "\n".join(lines)
+
+
+@mcp.tool()
 def apply(repo: str = "", sandbox: bool = True) -> str:
     """Apply the refactor plan (file moves + symbol moves + import rewrites).
 
@@ -196,22 +364,34 @@ def apply(repo: str = "", sandbox: bool = True) -> str:
         git merge <branch>
     Pass sandbox=False to apply directly to the working tree.
     """
+    import rope.base.project as rp
+
     root = _repo(repo)
     plan = _load_plan(root)
-    plan_dict = {
-        "file_moves": [
-            {"source": m.source, "dest": m.dest, "dest_package": m.dest_package}
-            for m in plan.file_moves
-        ],
-        "symbol_moves": [
-            {"source": m.source, "dest": m.dest, "symbol": m.symbol}
-            for m in plan.symbol_moves
-            if m.approved
-        ],
-    }
+
+    def _plan_dict(p: RefactorPlan) -> dict:
+        return {
+            "file_moves": [
+                {"source": m.source, "dest": m.dest, "dest_package": m.dest_package}
+                for m in p.file_moves
+            ],
+            "symbol_moves": [
+                {"source": m.source, "dest": m.dest, "symbol": m.symbol}
+                for m in p.symbol_moves
+                if m.approved
+            ],
+            "source_root": p.source_root,
+        }
+
+    if not plan.file_moves and plan.pending_decisions:
+        return (
+            "No moves approved yet.\n"
+            "Run get_cluster_context to review graph evidence, "
+            "then approve_moves with your placement decisions."
+        )
 
     if not sandbox:
-        result = do_apply_plan(plan_dict, root, _out_dir(root))
+        result = do_apply_plan(_plan_dict(plan), root, _out_dir(root))
         return _summarise_result(result)
 
     wt_path, branch = create_worktree(root)
@@ -220,32 +400,84 @@ def apply(repo: str = "", sandbox: bool = True) -> str:
         wt_out = _out_dir(wt_path)
         wt_out.mkdir(parents=True, exist_ok=True)
         write_plan(wt_plan, wt_out / "refactor_plan.json")
-        wt_plan_dict = {
-            "file_moves": [
-                {"source": m.source, "dest": m.dest, "dest_package": m.dest_package}
-                for m in wt_plan.file_moves
-            ],
-            "symbol_moves": [
-                {"source": m.source, "dest": m.dest, "symbol": m.symbol}
-                for m in wt_plan.symbol_moves
-                if m.approved
-            ],
-        }
-        result = do_apply_plan(wt_plan_dict, wt_path, wt_out)
 
+        layout = detect_layout(wt_path)
+        wt_src = str(layout.source_root)
+        wt_env = {"PYTHONPATH": wt_src}
+
+        # --- Phase 1: file moves ---
+        project = rp.Project(str(wt_path))
+        file_moves = [
+            {"source": m.source, "dest": m.dest, "dest_package": m.dest_package}
+            for m in wt_plan.file_moves
+        ]
+        try:
+            applied, failed, dest_dirs = _run_file_moves(project, file_moves, dry_run=False)
+        finally:
+            project.close()
+
+        result = ApplyResult(applied=applied, failed=failed)
         if result.failed:
             discard_worktree(root, wt_path, branch)
-            return "FAILED (apply errors) — worktree discarded.\n" + _summarise_result(result)
+            return "FAILED (file moves) — worktree discarded.\n" + _summarise_result(result)
 
-        # Prepend the worktree's src/ so new pkg_NNN packages shadow the original install
-        wt_src = str(wt_path / "src")
-        validation = do_validate(wt_path, env={"PYTHONPATH": wt_src})
-        if not validation.passed:
+        # --- Phase 2: __init__.py creation ---
+        _ensure_package_inits(dest_dirs, layout.source_root)
+
+        # --- Structural validation: compileall after moves ---
+        v1 = do_validate(wt_path, env=wt_env, mode="structural", layout=layout)
+        if not v1.passed:
             discard_worktree(root, wt_path, branch)
-            return "FAILED (validation) — worktree discarded.\n" + _format_validation(validation)
+            return "FAILED (structural — after moves) — worktree discarded.\n" + _format_validation(v1)
+
+        # --- Behavioral pre-check: importability before import rewrites ---
+        v2 = do_validate(wt_path, env=wt_env, mode="behavioral", layout=layout)
+        if not v2.passed:
+            discard_worktree(root, wt_path, branch)
+            return "FAILED (installability — after moves) — worktree discarded.\n" + _format_validation(v2)
+
+        # --- Phase 3: import rewrites ---
+        src_root = layout.source_root if wt_plan.source_root else None
+        _, skipped = _run_import_rewrites(result.applied, wt_path, src_root)
+        result.skipped.extend(skipped)
+
+        # --- Structural validation: compileall after import rewrites ---
+        v3 = do_validate(wt_path, env=wt_env, mode="structural", layout=layout)
+        if not v3.passed:
+            discard_worktree(root, wt_path, branch)
+            return "FAILED (structural — after import rewrites) — worktree discarded.\n" + _format_validation(v3)
+
+        # --- Behavioral validation: pytest ---
+        v4 = do_validate(wt_path, env=wt_env, mode="behavioral", layout=layout)
+        if not v4.passed:
+            discard_worktree(root, wt_path, branch)
+            return "FAILED (behavioral/pytest) — worktree discarded.\n" + _format_validation(v4)
+
+        wt_out.mkdir(parents=True, exist_ok=True)
+        from refactor_plan.applicator.manifests import write_manifest
+        write_manifest(result, wt_out)
 
         commit_and_release(root, wt_path, "refactor: apply file moves")
-        return _sandbox_result(branch, _summarise_result(result))
+
+        # Record that the rename phase must run before this branch is merged.
+        save_state(_out_dir(root), pending_rename_branch=branch)
+
+        # Refresh contracts to reflect the new module layout
+        try:
+            _gp = ensure_graph(root)
+            _view = build_view(_gp)
+            do_generate_contracts(plan, _view, _gp, root, layout, force=False)
+        except Exception:
+            pass
+
+        return (
+            f"{_summarise_result(result)}\n\n"
+            f"Structural moves committed to branch '{branch}'.\n"
+            f"DO NOT MERGE YET — placeholder names are not final.\n"
+            f"Next: get_cluster_context → apply_rename_map\n"
+            f"Discard: git branch -D {branch}"
+        )
+
     except Exception:
         discard_worktree(root, wt_path, branch)
         raise
@@ -255,28 +487,111 @@ def apply(repo: str = "", sandbox: bool = True) -> str:
 # Cluster naming (context only — Claude Code supplies the names)
 # ---------------------------------------------------------------------------
 
+def _format_pending_decisions(plan: RefactorPlan, root: Path) -> str:
+    if not plan.pending_decisions:
+        return ""
+    lines = ["## Placement & Naming Review\n"]
+    for d in plan.pending_decisions:
+        coh_str = f"{d.cohesion:.2f}" if d.cohesion is not None else "n/a"
+        if d.needs_placement:
+            lines.append(f"### Community {d.community_id} — {len(d.source_files)} files  cohesion: {coh_str}  ({d.risk_level})  [PLACEMENT NEEDED]")
+            lines.append("")
+            lines.append("Current layout:")
+            for dir_path, files in d.current_dirs.items():
+                try:
+                    rel = Path(dir_path).relative_to(root)
+                except ValueError:
+                    rel = Path(dir_path)
+                indicator = "  ← spread" if len(d.current_dirs) > 1 else ""
+                lines.append(f"  {rel}/  ×{len(files)}{indicator}")
+        else:
+            single_dir = next(iter(d.current_dirs))
+            try:
+                rel = Path(single_dir).relative_to(root)
+            except ValueError:
+                rel = Path(single_dir)
+            lines.append(f"### Community {d.community_id} — {len(d.source_files)} files  cohesion: {coh_str}  ({d.risk_level})  [confirmed: {rel}/]")
+
+        lines.append("")
+        lines.append("Files:")
+        for f in d.source_files:
+            try:
+                rel_f = Path(f).relative_to(root)
+            except ValueError:
+                rel_f = Path(f)
+            lines.append(f"  {rel_f}")
+
+        if d.cross_cluster_edges and d.needs_placement:
+            lines.append("")
+            lines.append("Cross-cluster connections (top edges):")
+            edge_summary: dict[str, int] = {}
+            for e in d.cross_cluster_edges:
+                tgt_file = e.get("target_file", "")
+                try:
+                    tgt_rel = str(Path(tgt_file).relative_to(root))
+                except ValueError:
+                    tgt_rel = tgt_file
+                edge_summary[tgt_rel] = edge_summary.get(tgt_rel, 0) + 1
+            for tgt, count in sorted(edge_summary.items(), key=lambda x: -x[1])[:5]:
+                lines.append(f"  → {tgt}: {count} edge(s)")
+
+        if d.surprising_connections:
+            lines.append("")
+            lines.append("Surprising connections:")
+            for s in d.surprising_connections[:3]:
+                src = s.get("source", "")
+                tgt = s.get("target", "")
+                conf = s.get("confidence", "")
+                score = s.get("confidence_score", "")
+                lines.append(f"  {src} ↔ {tgt}  ({conf} {score})")
+
+        lines.append("---")
+
+    return "\n".join(lines)
+
+
 @mcp.tool()
 def get_cluster_context(repo: str = "") -> str:
     """Return structured context for each placeholder cluster.
 
-    Shows each pkg_NNN package's files, classes, functions, and cross-cluster
-    dependencies.  Use this to understand the clusters and choose semantic
-    snake_case names.  Then call apply_rename_map with your choices.
+    Shows each community's graph evidence (placement, cohesion, edges, surprises)
+    and each pkg_NNN cluster's files, classes, functions, and cross-cluster deps.
+    Use this to decide where files should live and what packages should be called.
+    Then call approve_moves with placements and apply_rename_map with names.
     """
     root = _repo(repo)
     graph_path = ensure_graph(root)
     view = build_view(graph_path)
     plan = _load_plan(root)
-    context = build_naming_context(plan, view)
-    if not context:
-        return "No clusters with placeholder names found in the current plan."
-    return (
-        context
-        + "\n\n"
-        "Suggest a snake_case name for each pkg_NNN above, then call "
-        "apply_rename_map with a JSON object like: "
-        '{"pkg_001": "auth", "pkg_002": "pipeline"}'
-    )
+
+    sections: list[str] = []
+
+    # Pending decisions: placement + surprising connections for all communities.
+    decisions_section = _format_pending_decisions(plan, root)
+    if decisions_section:
+        sections.append(decisions_section)
+
+    # Naming context for any pkg_NNN clusters.
+    naming_context = build_naming_context(plan, view)
+    if naming_context:
+        sections.append(naming_context)
+
+    if not sections:
+        return "No pending decisions or placeholder clusters found in the current plan."
+
+    placement_needed = [d for d in plan.pending_decisions if d.needs_placement]
+    footer_parts = []
+    if placement_needed:
+        footer_parts.append(
+            "Call approve_moves([{\"source\": \"...\", \"dest\": \"...\"}]) "
+            "with your placement decisions. Files not listed stay where they are."
+        )
+    if naming_context:
+        footer_parts.append(
+            "Call apply_rename_map({\"pkg_001\": \"auth\", ...}) with naming decisions."
+        )
+
+    return "\n\n".join(sections) + ("\n\n" + "\n".join(footer_parts) if footer_parts else "")
 
 
 @mcp.tool()
@@ -309,7 +624,14 @@ def apply_rename_map(rename_map_json: str, repo: str = "", sandbox: bool = True)
 
     # --- sandboxed path ---
     plan = _load_plan(root)
-    wt_path, branch = create_worktree(root)
+    state = load_state(_out_dir(root))
+    base_branch = state.get("pending_rename_branch")
+
+    if base_branch:
+        wt_path, branch = create_worktree_from_branch(root, base_branch)
+    else:
+        wt_path, branch = create_worktree(root)
+
     try:
         wt_plan = translate_plan(plan, root, wt_path)
         wt_out = _out_dir(wt_path)
@@ -328,6 +650,21 @@ def apply_rename_map(rename_map_json: str, repo: str = "", sandbox: bool = True)
             return "FAILED (validation) — worktree discarded.\n" + _format_validation(validation)
 
         commit_and_release(root, wt_path, "refactor: apply rename map")
+
+        # Clear the pending rename state now that renames are committed.
+        if base_branch:
+            save_state(_out_dir(root), pending_rename_branch=None)
+
+        # Refresh contracts after renames change module names
+        try:
+            graph_path = ensure_graph(root)
+            view = build_view(graph_path)
+            _plan = _load_plan(root)
+            _layout = detect_layout(root)
+            do_generate_contracts(_plan, view, graph_path, root, _layout, force=False)
+        except Exception:
+            pass
+
         return _sandbox_result(branch, _summarise_result(result))
 
     except Exception:
@@ -414,6 +751,15 @@ def merge_sandbox(branch: str, repo: str = "") -> str:
         git diff HEAD...<branch>
     """
     root = _repo(repo)
+
+    state = load_state(_out_dir(root))
+    if state.get("pending_rename_branch") == branch:
+        return (
+            f"WARNING: branch '{branch}' contains structural moves only — "
+            f"placeholder names have not been replaced.\n"
+            f"Run apply_rename_map first, then merge the resulting rename branch."
+        )
+
     result = subprocess.run(
         ["git", "-C", str(root), "merge", "--no-ff", branch,
          "-m", f"refactor: merge {branch}"],
