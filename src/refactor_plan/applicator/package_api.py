@@ -335,6 +335,38 @@ def rewrite_symbol_callers(
     return touched
 
 
+def _has_external_importers(mod_file: Path, pkg_dir: Path, repo_root: Path) -> bool:
+    """True if any file outside pkg_dir imports this module — directly or through __init__."""
+    mod_dotted = _file_to_module(mod_file, repo_root)
+    if not mod_dotted:
+        return False
+    pkg_dotted = _file_to_module(pkg_dir / "__init__.py", repo_root)
+    init_map = _build_init_symbol_map(pkg_dir / "__init__.py")
+    serving_symbols = {sym for sym, stem in init_map.items() if stem == mod_file.stem}
+    pkg_dir_r = pkg_dir.resolve()
+
+    for py_file in repo_root.rglob("*.py"):
+        try:
+            py_file.resolve().relative_to(pkg_dir_r)
+            continue
+        except ValueError:
+            pass
+        try:
+            tree = _ast.parse(py_file.read_text(encoding="utf-8"))
+        except Exception:
+            continue
+        for node in _ast.walk(tree):
+            if not isinstance(node, _ast.ImportFrom) or not node.module or node.level:
+                continue
+            if node.module == mod_dotted:
+                return True
+            if node.module == pkg_dotted and node.names:
+                for alias in node.names:
+                    if alias.name in serving_symbols:
+                        return True
+    return False
+
+
 def _is_module_public(
     mod_file: Path,
     pkg_dir: Path,
@@ -371,6 +403,33 @@ def _is_module_public(
         pass
 
     return False
+
+
+def privatize_if_internal(mod_file: Path, repo_root: Path) -> str | None:
+    """If mod_file has no external importers, rename it with _ prefix and strip its __init__ entry.
+
+    Returns the new path if renamed, None otherwise. Safe to call after a symbol
+    move to check if the source file became private.
+    """
+    if mod_file.stem.startswith("_"):
+        return None
+    pkg_dir = mod_file.parent
+    if not (pkg_dir / "__init__.py").exists():
+        return None
+    if _has_external_importers(mod_file, pkg_dir, repo_root):
+        return None
+
+    from refactor_plan.execution.rope_rename import _make_project, rename_module
+
+    _strip_init_reexports(pkg_dir / "__init__.py", mod_file.stem)
+    project = _make_project(repo_root)
+    try:
+        result = rename_module(repo_root, mod_file, f"_{mod_file.stem}", project=project)
+    finally:
+        project.close()
+    if hasattr(result, "dest"):
+        return result.dest
+    return None
 
 
 def _strip_init_reexports(init_path: Path, stem: str) -> bool:

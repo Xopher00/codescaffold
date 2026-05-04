@@ -455,7 +455,8 @@ def test_apply_plan_symbol_move_compileall(messy_repo: Path) -> None:
     }
     out_dir = messy_repo / ".refactor_plan"
     result = apply_plan(plan, messy_repo, out_dir, dry_run=False)
-    assert len(result.applied) == 1
+    assert len(result.applied) >= 1
+    assert result.applied[0].kind == MoveKind.SYMBOL
     proc = subprocess.run(
         ["python", "-m", "compileall", str(messy_repo / "src")],
         capture_output=True,

@@ -9,6 +9,7 @@ from .file_phase import _path_to_module, _run_file_moves
 from .import_rewrites import MoveRecord, add_back_import, rewrite_cross_cluster_imports
 from .result import AppliedAction, ApplyResult, Escalation, MoveKind
 from refactor_plan.applicator import apply_symbol_move
+from refactor_plan.applicator.package_api import privatize_if_internal
 from refactor_plan.records import write_manifest
 
 
@@ -153,6 +154,22 @@ def apply_plan(
 
         if dry_run:
             return result
+
+        # Phase 3b: check if any symbol-move source files became private
+        symbol_sources: set[Path] = set()
+        for action in result.applied:
+            if action.kind == MoveKind.SYMBOL:
+                src_path = Path(action.source)
+                if src_path.exists():
+                    symbol_sources.add(src_path)
+        for src_path in sorted(symbol_sources):
+            new_path = privatize_if_internal(src_path, repo_root)
+            if new_path:
+                result.applied.append(AppliedAction(
+                    kind=MoveKind.FILE,
+                    source=str(src_path),
+                    dest=new_path,
+                ))
 
         # Phase 4: import rewrites
         _, skipped = _run_import_rewrites(result.applied, repo_root, src_root)
