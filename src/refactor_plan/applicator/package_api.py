@@ -419,6 +419,8 @@ def privatize_if_internal(mod_file: Path, repo_root: Path) -> str | None:
     if _has_external_importers(mod_file, pkg_dir, repo_root):
         return None
 
+    from refactor_plan.execution.rope_rename import _make_project, rename_module
+
     _strip_init_reexports(pkg_dir / "__init__.py", mod_file.stem)
     project = _make_project(repo_root)
     try:

@@ -26,7 +26,6 @@ Pass sandbox=False to apply directly (faster, no safety net).
 from __future__ import annotations
 
 from mcp.server.fastmcp import FastMCP
-from refactor_plan.interface.analysis import analyze, discard_sandbox, insert_docstring, reset, rollback, validate
 
 mcp = FastMCP(
     "codescaffold",
@@ -44,6 +43,7 @@ mcp = FastMCP(
 from refactor_plan.interface.apply_ops import apply, apply_rename_map, merge_sandbox, rename
 from refactor_plan.interface.graph_ops import contracts, get_cluster_context, get_symbol_context, validate_contracts
 from refactor_plan.planning.approval import approve_moves, approve_symbol_moves
+from refactor_plan.reporting.analysis import analyze, discard_sandbox, insert_docstring, reset, rollback, validate
 
 for _fn in [
     apply, apply_rename_map, merge_sandbox, rename,

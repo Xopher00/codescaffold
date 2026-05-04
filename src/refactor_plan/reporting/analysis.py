@@ -1,8 +1,11 @@
+
+
 import subprocess
 from refactor_plan.layout import detect_layout
-from refactor_plan.reporting._reporter import render_dry_run_report, write_report
+from ._reporter import render_dry_run_report, write_report
 from refactor_plan.server_helpers import _load_plan, _out_dir, _plan_path, _repo, _reset_stale_artifacts
 from refactor_plan.validation import validate as do_validate
+from refactor_plan.interface import ensure_graph, build_view
 from refactor_plan.planning import plan as build_plan, write_plan
 from refactor_plan.contracts import generate_contracts as do_generate_contracts
 from refactor_plan.naming import insert_docstring_text
