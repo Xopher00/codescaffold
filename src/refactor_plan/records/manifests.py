@@ -9,6 +9,7 @@ _STRAY_MANIFEST = "stray_deleted_manifest.json"
 
 
 def write_manifest(result: ApplyResult, out_dir: Path) -> Path:
+    """Serialise an ApplyResult to a timestamped JSON manifest file in out_dir, recording every applied action and escalation for audit and rollback."""
     path = out_dir / _INIT_MANIFEST
     path.write_text(result.model_dump_json(indent=2), encoding="utf-8")
     return path

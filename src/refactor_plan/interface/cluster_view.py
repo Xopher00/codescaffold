@@ -13,6 +13,7 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ClusterView:
+    """Read-only projection of a single detected community, exposing graph evidence (cohesion, edges, surprises) used for placement and naming decisions."""
     file_communities: dict[int, list[str]]
     G: nx.Graph
     # Raw symbol-level community assignments from graphify: {community_id: [node_ids]}
@@ -27,6 +28,7 @@ class ClusterView:
 
 
 def build_view(graph_json: Path) -> ClusterView:
+    """Load the normalized graph from disk and construct a list of ClusterView objects, one per detected community, for use by the planner and MCP tools."""
     G, communities = load_graph(graph_json)
 
     file_communities: dict[int, list[str]] = {}

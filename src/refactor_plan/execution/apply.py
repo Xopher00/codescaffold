@@ -39,10 +39,7 @@ def _run_import_rewrites(
     repo_root: Path,
     src_root: Path | None,
 ) -> tuple[list[MoveRecord], list[Escalation]]:
-    """Phase 3: build move records and rewrite cross-cluster imports.
-
-    Returns (move_records, skipped_escalations).
-    """
+    """Phase 4: rewrite all cross-cluster import references across the repo to reflect completed file and symbol moves, returning move records and any escalated failures."""
     move_records: list[MoveRecord] = []
     for action in applied:
         if action.kind == MoveKind.FILE:
@@ -101,15 +98,7 @@ def apply_plan(
     dry_run: bool = False,
     stop_after: Literal["moves", "rewrites"] | None = None,
 ) -> ApplyResult:
-    """Apply the refactor plan through explicit phases.
-
-    stop_after="moves"   — run file moves + init creation, then stop.
-    stop_after="rewrites" — run moves + init creation + import rewrites, then stop.
-    stop_after=None      — run all phases (default).
-
-    Callers that need to inject validation between phases should call
-    _run_file_moves and _run_import_rewrites directly.
-    """
+    """Apply an approved refactor plan through sequential phases: file moves, __init__.py creation, symbol moves, and cross-cluster import rewrites."""
     result = ApplyResult()
 
     # Deduplicate by source — planner can assign the same file to multiple clusters

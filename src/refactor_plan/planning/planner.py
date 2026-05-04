@@ -148,6 +148,7 @@ def _symbol_move_proposals(
 
 
 def plan(view: ClusterView, repo_root: Path, graph_json: Path) -> RefactorPlan:
+    """Analyse the normalized graph and return a RefactorPlan containing file-move proposals, symbol-move proposals, and any communities requiring human placement decisions."""
     all_files = [sf for files in view.file_communities.values() for sf in files]
     layout = detect_layout(repo_root, all_files)
     src_root = layout.source_root
@@ -243,6 +244,7 @@ def plan(view: ClusterView, repo_root: Path, graph_json: Path) -> RefactorPlan:
 
 
 def write_plan(refactor_plan: RefactorPlan, path: Path) -> Path:
+    """Serialise a RefactorPlan to refactor_plan.json inside out_dir, creating the directory if needed."""
     path.parent.mkdir(parents=True, exist_ok=True)
     path.write_text(refactor_plan.model_dump_json(indent=2), encoding="utf-8")
     return path

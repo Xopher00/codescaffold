@@ -9,6 +9,7 @@ from pydantic import BaseModel
 
 @dataclass
 class FileRef:
+    """Validated reference to a source file that rope can resolve, used to gate moves before any files are touched."""
     graphify_source_file: str
     abs_path: Path
     rope_rel: str
@@ -23,17 +24,20 @@ class FileRef:
 
 
 class MoveKind(str, Enum):
+    """Discriminates between a whole-file move and a single-symbol extraction move."""
     FILE = "FILE"
     SYMBOL = "SYMBOL"
     PACKAGE = "PACKAGE"
 
 
 class MoveStrategy(str, Enum):
+    """Indicates which mechanical tool (rope or LibCST) was used to execute a move."""
     ROPE = "rope"
     LIBCST = "libcst"
 
 
 class AppliedAction(BaseModel):
+    """Record of a single successfully executed move — file or symbol — including the strategy used, files touched, and original content for rollback."""
     kind: MoveKind
     source: str
     dest: str
@@ -46,6 +50,7 @@ class AppliedAction(BaseModel):
 
 
 class Escalation(BaseModel):
+    """Signals that a move could not be completed mechanically and requires human review, capturing the reason and strategy attempted."""
     kind: MoveKind
     source: str
     dest: str | None = None
@@ -56,6 +61,7 @@ class Escalation(BaseModel):
 
 
 class ApplyResult(BaseModel):
+    """Aggregated outcome of an apply pass: lists of successfully applied actions, escalated failures, skipped moves, and blocked items."""
     applied: list[AppliedAction] = []
     skipped: list[Escalation] = []
     failed: list[Escalation] = []
@@ -64,6 +70,7 @@ class ApplyResult(BaseModel):
 
 
 class FileMoveProposal(BaseModel):
+    """Proposal to move a source file into a destination package directory, with an optional rationale and risk level."""
     source: str
     dest: str
     dest_package: str
@@ -71,6 +78,7 @@ class FileMoveProposal(BaseModel):
 
 
 class ClusterInfo(BaseModel):
+    """Structural metadata for a detected community: its files, cohesion score, cross-cluster edges, and proposed destination package."""
     community_id: int
     source_files: list[str]
     proposed_package: str | None = None

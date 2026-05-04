@@ -21,12 +21,14 @@ _STRUCTURAL_RELATIONS = frozenset(("uses", "calls", "contains", "inherits", "imp
 
 
 class RenameEntry(BaseModel):
+    """A single LLM-approved rename binding a placeholder package or module name to its intended semantic name."""
     old_name: str
     new_name: str
     rationale: str = ""
 
 
 class RenameMap(BaseModel):
+    """Ordered collection of RenameEntry objects representing the complete semantic rename map for a refactor pass."""
     entries: list[RenameEntry] = []
 
 

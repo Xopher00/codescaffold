@@ -4,6 +4,7 @@ from pydantic import BaseModel
 from refactor_plan.execution.models import ClusterInfo, FileMoveProposal
 
 class SymbolMoveProposal(BaseModel):
+    """Proposal to extract a single named symbol from one file into another, generated from graph clustering evidence."""
     source: str
     dest: str
     symbol: str
@@ -12,6 +13,7 @@ class SymbolMoveProposal(BaseModel):
 
 
 class PendingDecision(BaseModel):
+    """A community whose files span multiple directories and requires human placement input before an automated move can be approved."""
     community_id: int
     source_files: list[str]
     current_dirs: dict[str, list[str]]  # dir_path → [file_paths]
@@ -24,6 +26,7 @@ class PendingDecision(BaseModel):
 
 
 class RefactorPlan(BaseModel):
+    """Immutable plan artifact produced by the planner, bundling file moves, symbol moves, and pending placement decisions for a single refactor pass."""
     file_moves: list[FileMoveProposal] = []       # populated by approve_moves, not plan()
     symbol_moves: list[SymbolMoveProposal] = []
     clusters: list[ClusterInfo] = []

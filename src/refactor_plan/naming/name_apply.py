@@ -25,6 +25,7 @@ def apply_rename_map(
     out_dir: Path,
     dry_run: bool = False,
 ) -> ApplyResult:
+    """Mechanically rename each placeholder package directory in the rename map using rope, rewriting all imports across the repo and returning an ApplyResult."""
     result = ApplyResult()
 
     cluster_pkg = {

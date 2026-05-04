@@ -72,6 +72,7 @@ def normalize_source_files(G: nx.Graph, repo_root: Path) -> dict[str, Path]:
 
 
 def build_file_refs(G: nx.Graph, repo_root: Path) -> dict[str, FileRef]:
+    """Resolve all file-node entries in the normalized graph into validated FileRef objects, filtering out paths that do not exist on disk."""
     source_files = normalize_source_files(G, repo_root)
     layout = detect_layout(repo_root)
     src_root = layout.source_root

@@ -173,6 +173,7 @@ def apply_symbol_move(
     repo_root: Path,
     project: rp.Project | None = None,
 ) -> AppliedAction | Escalation:
+    """Extract a named top-level symbol from src_abs into dest_abs using LibCST, carrying the necessary imports and cleaning up the source file."""
     _escalation_base = dict(
         kind=MoveKind.SYMBOL,
         source=str(src_abs),
