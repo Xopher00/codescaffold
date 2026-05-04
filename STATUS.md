@@ -22,29 +22,40 @@ Start with:
 
 Also review graphify’s MCP/server interface, especially `graphify/serve.py`, because codescaffold currently appears to use graphify too shallowly.
 
-## Current status
+## Current status (as of 2026-05-04)
 
 The MCP server is registered as `codescaffold-mcp`.
 
-Destructive tools use git worktree sandboxes under `/tmp/codescaffold_<ts>`. `sandbox=True` is the default. On success, changes are committed in the sandbox. On failure, the sandbox can be discarded.
+Destructive tools use git worktree sandboxes under `/tmp/codescaffold_<ts>`. `sandbox=True` is the default. On success, changes are committed in the sandbox. On failure, the sandbox is discarded.
 
 Current MCP tools:
 
 ```text
-analyze
-validate
-rollback
-apply
-get_cluster_context
-apply_rename_map
-rename
-merge_sandbox
-discard_sandbox
-get_symbol_context
-insert_docstring
-````
+analyze            — rebuild graph, cluster, emit pending_decisions + STRUCTURE_REPORT
+validate           — compileall + pytest
+rollback           — undo last apply batch
+approve_moves      — record model-approved file moves into the plan
+apply              — execute approved moves in sandbox (phases: move → init → compile → import rewrite → pytest)
+get_cluster_context — graph evidence per community for agent placement + naming decisions
+apply_rename_map   — rename pkg_NNN placeholders on top of apply branch
+rename             — ad-hoc symbol/module/package rename via rope
+merge_sandbox      — merge final branch + auto-reset stale artifacts
+discard_sandbox    — discard sandbox branch
+reset              — manually clear stale plan, state, and .importlinter
+get_symbol_context — graph context for a symbol (for docstring writing)
+insert_docstring   — insert or replace a symbol docstring
+contracts          — generate/refresh .importlinter contracts
+validate_contracts — run import-linter against .importlinter
+```
 
 Anthropic API calls have been removed.
+
+The bootstrap (running codescaffold on itself) has been partially completed:
+- `name_apply.py` moved to `naming/`
+- `worktree.py` moved to `interface/`
+- `applicator/execution/` and `applicator/records/` subdirs created then promoted to `execution/` and `records/` at package root
+
+Priorities 1–4 and Priority 7 from the original backlog are done. Priority 5 (graphify depth) and Priority 6 (contracts lifecycle) are partially done.
 
 The bootstrap attempt runs codescaffold on itself. `apply` reaches validation, passes `compileall`, then fails pytest with:
 
@@ -99,7 +110,7 @@ analyze
 
 Contracts should exist early enough to protect latent structure, but they must also be refreshable after moves and renames. Treat contracts as generated, maintainable artifacts, not one-time static files.
 
-## Priority 1 — fix package creation after moves
+## Priority 1 — fix package creation after moves ✓ DONE
 
 Implement explicit `__init__.py` creation for every destination package directory created by moves.
 
@@ -111,7 +122,7 @@ Requirements:
 * add tests for this behavior
 * keep this independent from import rewriting
 
-## Priority 2 — split apply into phases
+## Priority 2 — split apply into phases ✓ DONE
 
 Refactor the apply pipeline so these are independently triggerable or internally staged:
 
@@ -126,7 +137,7 @@ Do not keep “move files + rewrite imports + pytest” as one opaque operation.
 
 A structural move should be able to run and validate with `compileall` before pytest is attempted.
 
-## Priority 3 — fix validation semantics
+## Priority 3 — fix validation semantics ✓ DONE
 
 Validation needs at least two modes:
 
@@ -153,7 +164,7 @@ optional generated smoke tests
 
 Do not generate AI-written behavioral unit tests and treat them as a correctness oracle. Generated tests may be useful as smoke/characterization scaffolding, but they must be marked as generated and reviewable.
 
-## Priority 4 — source root and test path detection
+## Priority 4 — source root and test path detection ✓ DONE
 
 The planner currently hardcodes source roots such as `src/` and `lib/`. Replace this with explicit configuration plus safer detection.
 
@@ -392,6 +403,118 @@ Investigate whether tools such as Pynguin, Hypothesis, or CrossHair are useful:
 
 For this pass, prioritize deterministic import/smoke tests over generated behavioral tests.
 
+## Priority 9 — agent placement guidance and status-quo bias
+
+This is the most important outstanding problem.
+
+### The trap
+
+When an agent reviews `get_cluster_context` output, it sees the current directory layout alongside graph evidence. The current layout is visually salient. The agent tends to interpret co-location as correctness: "these files are already together, so they must belong together."
+
+This is wrong. Co-location in an existing codebase is evidence of history, not of correct architecture. Files accumulate in directories because someone put them there at some point, not because they are structurally cohesive. The graph is the actual signal. The current layout is just context.
+
+The tool currently reinforces this bias:
+
+- `[confirmed: src/dir/]` is labelled as if approval has been given. It has not. It means "co-located as of today."
+- Co-located communities with low cohesion and surprising cross-cluster connections are silently marked confirmed, receiving no scrutiny.
+- The output shows current layout first, graph evidence second — the wrong priority order.
+
+### Required fixes
+
+**Reframe `[confirmed]` as `[co-located]`.**
+
+Co-location is an observation, not a judgment. The label `[confirmed]` implies no action needed. Rename it.
+
+**Show cohesion scores with interpretation.**
+
+A cohesion score of 0.05 means the files in a community have almost no internal edge density — they are structurally independent, sharing a directory by accident or convention. Show this explicitly:
+
+```
+cohesion: 0.05  ← LOW — files share a directory but have weak structural coupling
+cohesion: 0.62  ← HIGH — strong internal dependencies
+```
+
+Add a `[REVIEW]` flag for co-located communities where cohesion < 0.20 or where surprising connections are present. These are candidates for splitting even though they are not scattered.
+
+**Show dependency direction, not just counts.**
+
+"5 cross-cluster edges" is ambiguous. "5 outgoing (this community calls others)" vs "5 incoming (others call this community)" tells a different story. An inward-facing utility module should be placed near its callers, not near other utilities it happens to be grouped with.
+
+Show:
+```
+Dependencies:
+  → community 2: 8 outgoing (this calls those)
+  ← community 0: 3 incoming (those call this)
+```
+
+**Show file role signals.**
+
+For each file in a community, indicate:
+- hub: high total degree (many connections across the codebase)
+- bridge: connects two otherwise disconnected communities
+- leaf: few connections, mostly consumed
+- isolated: very few connections, may be misplaced or dead
+
+**Explicit agent guidance at the top of every `get_cluster_context` response.**
+
+Add a header block that the agent reads before reviewing communities:
+
+```
+PLACEMENT REVIEW GUIDANCE
+─────────────────────────
+The current directory layout reflects history, not architecture.
+Co-located files are not confirmed as correctly placed.
+Use graph signals — cohesion, dependency direction, surprising
+connections — to evaluate placement, not current directory names.
+
+Ask for each community:
+  - Do these files actually call each other, or just share a folder?
+  - Who depends on this community from outside?
+  - Do surprising connections suggest this community is in the wrong place?
+  - Would splitting this community reduce cross-cluster coupling?
+
+[co-located] means "currently together" — not "correctly placed."
+[PLACEMENT NEEDED] means "scattered" — but scattered may still be right.
+```
+
+**Cohesion floor for "no action needed" classification.**
+
+Do not classify a community as placement-stable based on co-location alone. Require both:
+- All files in the same directory AND
+- Cohesion ≥ some threshold (e.g. 0.30) AND
+- No surprising connections flagged
+
+Only when all three hold should the output treat the community as low-priority.
+
+### Why this matters
+
+The whole point of the tool is to find structural problems the agent would not notice from reading code. If the agent then ignores graph signals in favour of the current layout, the tool is not working. The output must make graph signals salient and make status-quo bias difficult.
+
+## Priority 10 — deeper graphify consumption in placement evidence
+
+`get_cluster_context` currently shows:
+- community_id, file list
+- cohesion score
+- cross-cluster edge counts
+- surprising_connections list
+
+It does not show:
+- edge relation types (calls vs imports vs inherits vs shares_data — different architectural signals)
+- edge confidence breakdown (EXTRACTED vs INFERRED — inferred edges should be labelled as such)
+- which specific symbols drive the cross-cluster edges (file-level coupling is coarse; symbol-level coupling is actionable)
+- god-node membership (a file with degree > threshold is a god node and may need splitting regardless of community)
+- bridge score (a file that is the only connection between two communities is a structural risk)
+- cycle involvement (files in import cycles must stay together or the cycle must be broken first)
+
+These are all present in `view.G`. Surface them.
+
+Do not add all of these at once. Add the highest-signal ones first:
+
+1. Edge relation type breakdown (calls/imports/inherits) — tells you whether coupling is structural or just organizational
+2. Symbol-level cross-cluster edges (top 3–5) — actionable, tells you exactly what drives the coupling
+3. God-node flag — surfaces files that need splitting before moving
+4. Bridge flag — surfaces files that are dangerous to move without analysis
+
 ## Anti-goals
 
 Do not:
@@ -401,6 +524,7 @@ Do not:
 * make graphify usage even shallower
 * duplicate graphify’s graph server logic without a reason
 * treat community detection as architectural truth
+* treat co-location as evidence of correct placement
 * treat graph edges as proof of semantic equivalence
 * keep move/import rewrite/pytest fused
 * rely on hidden source-root or test-path heuristics
@@ -409,6 +533,7 @@ Do not:
 * permanently expose placeholder package names as final architecture
 * use lazy imports to hide bad boundaries
 * reintroduce Anthropic API calls into codescaffold internals
+* present current directory layout as a neutral backdrop — it is a prior assumption that graph evidence should challenge
 
 ## Expected output
 

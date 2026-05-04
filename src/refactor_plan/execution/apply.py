@@ -35,6 +35,37 @@ def _ensure_package_inits(dest_dirs: set[Path], boundary: Path) -> list[Path]:
     return created
 
 
+def _cleanup_empty_source_dirs(applied: list[AppliedAction], boundary: Path) -> list[Path]:
+    """Remove source directories that became empty (or __init__.py-only) after file moves.
+
+    Walks each moved file's source directory upward, removing dirs that have no
+    remaining content besides a lone __init__.py, stopping at boundary.
+    """
+    removed: list[Path] = []
+    candidate_dirs = {Path(a.source).parent for a in applied if a.kind == MoveKind.FILE}
+
+    for src_dir in sorted(candidate_dirs, reverse=True):  # deepest first
+        current = src_dir
+        while current != boundary and current != current.parent:
+            if not current.exists():
+                current = current.parent
+                continue
+            non_init = [f for f in current.iterdir() if f.name != "__init__.py"]
+            if non_init:
+                break  # dir still has real content
+            init = current / "__init__.py"
+            if init.exists():
+                init.unlink()
+            try:
+                current.rmdir()
+                removed.append(current)
+            except OSError:
+                break  # not actually empty (race or non-empty subdir)
+            current = current.parent
+
+    return removed
+
+
 # ---------------------------------------------------------------------------
 # Phase functions
 # ---------------------------------------------------------------------------

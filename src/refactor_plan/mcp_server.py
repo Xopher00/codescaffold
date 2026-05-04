@@ -47,7 +47,7 @@ from refactor_plan.reporting.reporter import render_dry_run_report, write_report
 from refactor_plan.validation.validator import validate as do_validate
 from refactor_plan.naming.name_apply import apply_rename_map as do_apply_rename_map
 from refactor_plan.interface.worktree import commit_and_release, create_worktree, create_worktree_from_branch, discard_worktree, load_state, save_state, translate_plan
-from refactor_plan.execution.apply import _ensure_package_inits, _run_file_moves, _run_import_rewrites, apply_plan as do_apply_plan
+from refactor_plan.execution.apply import _cleanup_empty_source_dirs, _ensure_package_inits, _run_file_moves, _run_import_rewrites, apply_plan as do_apply_plan
 from refactor_plan.execution.rope_rename import rename_module as do_rename_module, rename_symbol as do_rename_symbol
 from refactor_plan.records.rollback import rollback as do_rollback
 from refactor_plan.execution.models import AppliedAction, ApplyResult, Escalation
@@ -414,8 +414,9 @@ def apply(repo: str = "", sandbox: bool = True) -> str:
             discard_worktree(root, wt_path, branch)
             return "FAILED (file moves) — worktree discarded.\n" + _summarise_result(result)
 
-        # --- Phase 2: __init__.py creation (dest_dirs may include new subdirs) ---
+        # --- Phase 2: __init__.py creation + empty source dir cleanup ---
         _ensure_package_inits(dest_dirs, layout.source_root)
+        _cleanup_empty_source_dirs(result.applied, layout.source_root)
 
         # --- Structural validation: compileall after moves ---
         v1 = do_validate(wt_path, env=wt_env, mode="structural", layout=layout)
@@ -780,7 +781,37 @@ def merge_sandbox(branch: str, repo: str = "") -> str:
     )
     if result.returncode != 0:
         return f"FAILED: git merge returned:\n{result.stderr.strip()}"
+
+    _reset_stale_artifacts(_out_dir(root))
     return f"Merged '{branch}' into current branch.\n{result.stdout.strip()}"
+
+
+def _reset_stale_artifacts(out_dir: Path) -> None:
+    """Remove plan, state, and import-linter contracts after a successful merge."""
+    for name in ("refactor_plan.json", "state.json"):
+        p = out_dir / name
+        if p.exists():
+            p.unlink()
+    importlinter = out_dir.parent / ".importlinter"
+    if importlinter.exists():
+        importlinter.unlink()
+
+
+@mcp.tool()
+def reset(repo: str = "") -> str:
+    """Delete stale refactor plan, state, and import-linter contracts.
+
+    Safe to call any time — removes .refactor_plan/refactor_plan.json,
+    .refactor_plan/state.json, and .importlinter so the next analyze
+    starts from a clean slate.  Does not touch manifests or reports.
+    """
+    root = _repo(repo)
+    out_dir = _out_dir(root)
+    _reset_stale_artifacts(out_dir)
+    return (
+        "Reset complete. Removed: refactor_plan.json, state.json, .importlinter "
+        "(if present). Run analyze to start fresh."
+    )
 
 
 @mcp.tool()
