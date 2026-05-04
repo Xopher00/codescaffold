@@ -83,7 +83,7 @@ def render_dry_run_report(plan: dict, repo_root: str) -> str:
             n_files = len(d.get("source_files", []))
             dirs = d.get("current_dirs", {})
             n_dirs = len(dirs)
-            status = "PLACEMENT NEEDED" if d.get("needs_placement") else "confirmed"
+            status = "PLACEMENT NEEDED" if d.get("needs_placement") else "co-located"
             lines.append(f"| {cid} | {n_files} | {n_dirs} | {status} |")
         lines.append("")
     elif file_moves:
