@@ -285,7 +285,10 @@ def _format_pending_decisions(
             else:
                 internal, total, ext_dirs = 0, 0, []
 
-            ratio = internal / total if total > 0 else 1.0
+            if total == 0:
+                continue  # no outgoing signal — suppress entirely
+
+            ratio = internal / total
 
             if ratio >= _CLEAR_THRESHOLD:
                 clear_by_dest[dominant_dir].append((rel, internal, total))
