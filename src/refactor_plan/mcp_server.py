@@ -25,6 +25,7 @@ Pass sandbox=False to apply directly (faster, no safety net).
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import subprocess
@@ -122,6 +123,43 @@ def _format_validation(report: object) -> str:
             if cmd.stderr:
                 lines.append(cmd.stderr[:400])
     return "\n".join(lines)
+
+
+def _file_hash(path: Path) -> str | None:
+    try:
+        return hashlib.sha256(path.read_bytes()).hexdigest()[:8]
+    except OSError:
+        return None
+
+
+def _cluster_for_file(plan: "RefactorPlan | None", rel_path: str) -> dict:
+    """Return graph metrics for rel_path from the plan, or {} if unavailable."""
+    if plan is None:
+        return {}
+    for cluster in plan.clusters:
+        if any(rel_path in sf for sf in cluster.source_files):
+            return {
+                "community": f"comm_{cluster.community_id}",
+                "cohesion": round(cluster.cohesion, 3) if cluster.cohesion is not None else None,
+            }
+    return {}
+
+
+def _build_trace(root: Path, tool: str, **fields) -> str:
+    """Return a Codescaffold-Trace git trailer line with structured metadata."""
+    trace: dict = {"tool": tool}
+    trace.update({k: v for k, v in fields.items() if v is not None})
+
+    plan_path = _plan_path(root)
+    if (h := _file_hash(plan_path)):
+        trace["plan_hash"] = h
+
+    graph_candidates = list(root.glob("graphify-out/graph*.json")) + list(root.glob("**/graph.json"))
+    if graph_candidates:
+        if (h := _file_hash(graph_candidates[0])):
+            trace["graph_hash"] = h
+
+    return f"Codescaffold-Trace: {json.dumps(trace, separators=(',', ':'))}"
 
 
 def _sandbox_result(branch: str, summary: str) -> str:
@@ -538,7 +576,17 @@ def apply(repo: str = "", sandbox: bool = True) -> str:
         wt_out.mkdir(parents=True, exist_ok=True)
         write_manifest(result, wt_out)
 
-        commit_and_release(root, wt_path, "refactor: apply file moves")
+        files_moved = sum(1 for a in result.applied if a.kind.value == "FILE")
+        symbols_moved = sum(1 for a in result.applied if a.kind.value == "SYMBOL")
+        imports_rewritten = sum(a.imports_rewritten for a in result.applied)
+        trace = _build_trace(
+            root, "apply",
+            files_moved=files_moved,
+            symbols_moved=symbols_moved,
+            imports_rewritten=imports_rewritten,
+            validation="PASSED",
+        )
+        commit_and_release(root, wt_path, f"refactor: apply file moves\n\n{trace}")
 
         # Only gate on rename if moves used pkg_NNN placeholder directories.
         # When destinations are already semantic names, the branch is final.
@@ -685,7 +733,14 @@ def apply_rename_map(rename_map_json: str, repo: str = "", sandbox: bool = True)
             discard_worktree(root, wt_path, branch)
             return "FAILED (validation) — worktree discarded.\n" + _format_validation(validation)
 
-        commit_and_release(root, wt_path, "refactor: apply rename map")
+        renames_applied = [{"from": e.old_name, "to": e.new_name} for e in rename_map.entries]
+        trace = _build_trace(
+            root, "apply_rename_map",
+            renames=renames_applied,
+            imports_rewritten=sum(a.imports_rewritten for a in result.applied),
+            validation="PASSED",
+        )
+        commit_and_release(root, wt_path, f"refactor: apply rename map\n\n{trace}")
 
         # Clear the pending rename state now that renames are committed.
         if base_branch:
@@ -762,7 +817,19 @@ def rename(target: str, new_name: str, repo: str = "", sandbox: bool = True) -> 
             discard_worktree(root, wt_path, branch)
             return "FAILED (validation) — worktree discarded.\n" + _format_validation(validation)
 
-        commit_and_release(root, wt_path, f"refactor: rename '{target}' → '{new_name}'")
+        try:
+            plan = _load_plan(root)
+        except FileNotFoundError:
+            plan = None
+        trace = _build_trace(
+            root, "rename",
+            source=target,
+            dest=str(Path(target).parent / f"{new_name}.py"),
+            imports_rewritten=action.imports_rewritten,
+            validation="PASSED",
+            **_cluster_for_file(plan, target),
+        )
+        commit_and_release(root, wt_path, f"refactor: rename '{target}' → '{new_name}'\n\n{trace}")
         summary = (
             f"Renamed '{target}' → '{new_name}'\n"
             f"  Strategy: {action.strategy.value if action.strategy else '?'}\n"
