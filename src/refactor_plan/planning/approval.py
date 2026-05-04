@@ -2,12 +2,14 @@
 
 import json
 from pathlib import Path
+
 from refactor_plan.execution.result import FileMoveProposal
 from refactor_plan.layout import detect_layout
 from refactor_plan.planning.planner import write_plan
 from refactor_plan.planning.proposal import SymbolMoveProposal
+from refactor_plan.server_helpers import _check_circular_import_risks, _load_plan, _plan_path, _repo
 
-@mcp.tool()
+
 def approve_moves(moves_json: str, repo: str = "") -> str:
     """Record model-approved file moves into the plan for the next apply.
 
@@ -74,7 +76,7 @@ def approve_moves(moves_json: str, repo: str = "") -> str:
 
 
 
-@mcp.tool()
+
 def approve_symbol_moves(moves_json: str, repo: str = "") -> str:
     """Mark symbol moves as approved for the next apply.
 

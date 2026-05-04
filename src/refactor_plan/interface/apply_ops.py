@@ -1,25 +1,33 @@
 
 
+from pathlib import Path
+import json
+import subprocess
+
 from refactor_plan.contracts.import_contracts import generate_contracts as do_generate_contracts
 from refactor_plan.execution.apply import _ensure_package_inits, _run_import_rewrites, apply_plan as do_apply_plan
-from refactor_plan.validation.validator import validate as do_validate
-from pathlib import Path
 from refactor_plan.execution.file_phase import _cleanup_empty_source_dirs, _run_file_moves
 from refactor_plan.execution.result import Escalation, AppliedAction, ApplyResult
+from refactor_plan.execution.rope_rename import rename_module as do_rename_module, rename_symbol as do_rename_symbol
 from refactor_plan.interface.cluster_view import build_view
 from refactor_plan.interface.graph_bridge import ensure_graph
-from refactor_plan.interface.worktree import create_worktree_from_branch, load_state, commit_and_release, create_worktree, discard_worktree, save_state, translate_plan
+from refactor_plan.interface.worktree import (
+    commit_and_release, create_worktree, create_worktree_from_branch,
+    discard_worktree, load_state, save_state, translate_plan,
+)
 from refactor_plan.layout import detect_layout
+from refactor_plan.naming.namer import RenameEntry, RenameMap
+from refactor_plan.naming.rename_apply import apply_rename_map as do_apply_rename_map
 from refactor_plan.planning.planner import write_plan
 from refactor_plan.planning.proposal import RefactorPlan
 from refactor_plan.records.manifest import write_manifest
-import json
-from refactor_plan.naming.rename_apply import apply_rename_map as do_apply_rename_map
-from refactor_plan.naming.namer import RenameEntry, RenameMap
-from refactor_plan.execution.rope_rename import rename_module as do_rename_module, rename_symbol as do_rename_symbol
-import subprocess
+from refactor_plan.server_helpers import (
+    _build_trace, _cluster_for_file, _format_validation, _load_plan,
+    _out_dir, _repo, _reset_stale_artifacts, _sandbox_result, _summarise_result,
+)
+from refactor_plan.validation.validator import validate as do_validate
 
-@mcp.tool()
+
 def apply(repo: str = "", sandbox: bool = True) -> str:
     """Apply the refactor plan (file moves + symbol moves + import rewrites).
 
@@ -197,7 +205,7 @@ def apply(repo: str = "", sandbox: bool = True) -> str:
 
 
 
-@mcp.tool()
+
 def apply_rename_map(rename_map_json: str, repo: str = "", sandbox: bool = True) -> str:
     """Rename placeholder packages to semantic names.
 
@@ -289,7 +297,7 @@ def apply_rename_map(rename_map_json: str, repo: str = "", sandbox: bool = True)
 # Ad-hoc rename
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+
 def rename(target: str, new_name: str, repo: str = "", sandbox: bool = True) -> str:
     """Rename a symbol, module, or package — propagates to all call sites.
 
@@ -370,7 +378,7 @@ def rename(target: str, new_name: str, repo: str = "", sandbox: bool = True) -> 
 # Sandbox management
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+
 def merge_sandbox(branch: str, repo: str = "") -> str:
     """Merge a sandbox branch produced by apply_rename_map or rename.
 

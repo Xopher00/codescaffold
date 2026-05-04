@@ -1,21 +1,19 @@
 
 
-# ---------------------------------------------------------------------------
-# Structural analysis
-# ---------------------------------------------------------------------------
+import subprocess
 
 from refactor_plan.contracts.import_contracts import generate_contracts as do_generate_contracts
-from refactor_plan.planning.planner import plan as build_plan, write_plan
 from refactor_plan.interface.cluster_view import build_view
 from refactor_plan.interface.graph_bridge import ensure_graph
 from refactor_plan.layout import detect_layout
-from refactor_plan.reporting.reporter import render_dry_run_report, write_report
-from refactor_plan.validation.validator import validate as do_validate
-from refactor_plan.records.rollback import rollback as do_rollback
-import subprocess
 from refactor_plan.naming.docstringer import insert_docstring_text
+from refactor_plan.planning.planner import plan as build_plan, write_plan
+from refactor_plan.records.rollback import rollback as do_rollback
+from refactor_plan.reporting.reporter import render_dry_run_report, write_report
+from refactor_plan.server_helpers import _load_plan, _out_dir, _plan_path, _repo, _reset_stale_artifacts
+from refactor_plan.validation.validator import validate as do_validate
 
-@mcp.tool()
+
 def analyze(repo: str = "") -> str:
     """Extract graph, cluster files, and produce a structural plan.
 
@@ -50,7 +48,7 @@ def analyze(repo: str = "") -> str:
 
 
 
-@mcp.tool()
+
 def validate(repo: str = "") -> str:
     """Run validation commands (compileall + pytest by default).
 
@@ -68,7 +66,7 @@ def validate(repo: str = "") -> str:
 
 
 
-@mcp.tool()
+
 def rollback(repo: str = "") -> str:
     """Undo the last apply batch using the manifest and rope history."""
     root = _repo(repo)
@@ -77,7 +75,7 @@ def rollback(repo: str = "") -> str:
 
 
 
-@mcp.tool()
+
 def reset(repo: str = "") -> str:
     """Delete stale refactor plan, state, and import-linter contracts.
 
@@ -95,7 +93,7 @@ def reset(repo: str = "") -> str:
 
 
 
-@mcp.tool()
+
 def discard_sandbox(branch: str, repo: str = "") -> str:
     """Delete a sandbox branch without merging — discards the refactor."""
     root = _repo(repo)
@@ -110,7 +108,7 @@ def discard_sandbox(branch: str, repo: str = "") -> str:
 
 
 
-@mcp.tool()
+
 def insert_docstring(target: str, docstring_text: str, repo: str = "") -> str:
     """Insert or replace the docstring for a symbol.
 
@@ -132,11 +130,3 @@ def insert_docstring(target: str, docstring_text: str, repo: str = "") -> str:
         return f"FAILED: {error}"
     return f"Docstring written for '{symbol_name}' in {file_path.relative_to(root)}"
 
-
-
-# ---------------------------------------------------------------------------
-# Entry point
-# ---------------------------------------------------------------------------
-
-def main() -> None:
-    mcp.run()

@@ -1,15 +1,17 @@
 
 
+import subprocess
+
 from refactor_plan.contracts.import_contracts import check_staleness, generate_contracts as do_generate_contracts
 from refactor_plan.interface.cluster_view import build_view
 from refactor_plan.interface.graph_bridge import ensure_graph
 from refactor_plan.layout import detect_layout
-import subprocess
+from refactor_plan.naming.docstringer import build_docstring_context
 from refactor_plan.naming.namer import build_naming_context
 from refactor_plan.reporting.cluster_context import _format_pending_decisions
-from refactor_plan.naming.docstringer import build_docstring_context
+from refactor_plan.server_helpers import _load_plan, _repo
 
-@mcp.tool()
+
 def contracts(repo: str = "", force: bool = False) -> str:
     """Generate or refresh .importlinter contracts from current graph structure.
 
@@ -56,7 +58,7 @@ def contracts(repo: str = "", force: bool = False) -> str:
 
 
 
-@mcp.tool()
+
 def validate_contracts(repo: str = "") -> str:
     """Run import-linter to check .importlinter contracts.
 
@@ -92,7 +94,7 @@ def validate_contracts(repo: str = "") -> str:
 
 
 
-@mcp.tool()
+
 def get_cluster_context(repo: str = "") -> str:
     """Return structured context for each placeholder cluster.
 
@@ -145,7 +147,7 @@ def get_cluster_context(repo: str = "") -> str:
 # Docstring generation (context only — Claude Code writes the text)
 # ---------------------------------------------------------------------------
 
-@mcp.tool()
+
 def get_symbol_context(target: str, repo: str = "") -> str:
     """Return graph context for a symbol to help write its docstring.
 
