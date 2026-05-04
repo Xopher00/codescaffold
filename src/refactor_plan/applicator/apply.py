@@ -25,11 +25,11 @@ def _ensure_package_inits(dest_dirs: set[Path], boundary: Path) -> list[Path]:
     for dest_dir in sorted(dest_dirs):
         current = dest_dir
         while current != boundary and current != current.parent:
-            if current.exists():
-                init = current / "__init__.py"
-                if not init.exists():
-                    init.touch()
-                    created.append(init)
+            current.mkdir(parents=True, exist_ok=True)
+            init = current / "__init__.py"
+            if not init.exists():
+                init.touch()
+                created.append(init)
             current = current.parent
     return created
 

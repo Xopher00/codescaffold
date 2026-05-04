@@ -398,6 +398,12 @@ def apply(repo: str = "", sandbox: bool = True) -> str:
         wt_src = str(layout.source_root)
         wt_env = {"PYTHONPATH": wt_src}
 
+        # Pre-create all destination package dirs before rope runs.
+        # Rope creates the directory on the first move; subsequent moves to the
+        # same directory fail with EEXIST.  Creating them up-front is idempotent.
+        pre_dest_dirs = {Path(m.dest_package) for m in wt_plan.file_moves}
+        _ensure_package_inits(pre_dest_dirs, layout.source_root)
+
         # --- Phase 1: file moves ---
         project = rp.Project(str(wt_path))
         file_moves = [
@@ -414,7 +420,7 @@ def apply(repo: str = "", sandbox: bool = True) -> str:
             discard_worktree(root, wt_path, branch)
             return "FAILED (file moves) — worktree discarded.\n" + _summarise_result(result)
 
-        # --- Phase 2: __init__.py creation ---
+        # --- Phase 2: __init__.py creation (dest_dirs may include new subdirs) ---
         _ensure_package_inits(dest_dirs, layout.source_root)
 
         # --- Structural validation: compileall after moves ---
