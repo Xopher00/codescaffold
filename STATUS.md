@@ -486,6 +486,43 @@ Do not classify a community as placement-stable based on co-location alone. Requ
 
 Only when all three hold should the output treat the community as low-priority.
 
+## Additional focus: sandbox merge commits as audit trail
+
+Review the recent `merge_sandbox` commits, especially the structural and rename/refactor branches that were merged back into main.
+
+These commits are important because they show that codescaffold is no longer only analyzing structure; it is now capable of:
+
+- creating sandbox/worktree branches
+- applying structural file/package moves
+- rewriting imports
+- chaining a later rename pass on top of a structural branch
+- validating the sandbox result
+- merging the result back as an auditable commit
+
+Assess this workflow as a first-class product surface.
+
+The merge history should not only record *what changed*; it should also preserve enough information to explain *why the tool believed the change was safe*. Improve or design the merge/audit trail so each sandbox merge can reference or summarize:
+
+- source graph hash or graph artifact used
+- approved move list
+- approved rename map, if any
+- validation phases passed
+- contract generation/validation result
+- graph-based rationale for the move
+- risk flags, such as bridge nodes, weak cohesion, surprising connections, or high cross-cluster dependency
+- branch lineage, especially structural branch → rename branch → final merge
+
+Also review `_reset_stale_artifacts` behavior. Removing temporary files such as `refactor_plan.json` and `state.json` after merge makes sense, but deleting `.importlinter` may conflict with the goal of turning latent structure into durable architecture contracts.
+
+Decide explicitly whether generated import-linter contracts are:
+
+- temporary sandbox planning artifacts, or
+- durable architecture guards that should survive merge and be refreshed as the codebase changes
+
+If contracts are intended to enforce architecture, do not delete them automatically during `merge_sandbox`. Instead, preserve or regenerate them and include their status in the merge audit summary.
+
+in addition, branches and merges fail if something has not been commited on the main branch. this indicates we should incorporate a reminder to the agent to commit first before applying new changes, or to have some automatic mechanism in place. this could also act as a safety mechanism. if something goes wrong with a merge, we have a commit we can immediately roll back to.
+
 ### Why this matters
 
 The whole point of the tool is to find structural problems the agent would not notice from reading code. If the agent then ignores graph signals in favour of the current layout, the tool is not working. The output must make graph signals salient and make status-quo bias difficult.
