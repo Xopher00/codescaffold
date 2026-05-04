@@ -46,13 +46,13 @@ from refactor_plan.naming.docstringer import build_docstring_context, insert_doc
 from refactor_plan.naming.rename_apply import apply_rename_map as do_apply_rename_map
 from refactor_plan.naming.namer import RenameEntry, RenameMap, build_naming_context
 from refactor_plan.planning.planner import plan as build_plan, write_plan
-from refactor_plan.records.manifests import write_manifest
 from refactor_plan.records.rollback import rollback as do_rollback
 from refactor_plan.reporting.reporter import render_dry_run_report, write_report
 from refactor_plan.validation.validator import validate as do_validate
 from refactor_plan.reporting.cluster_context import _format_pending_decisions
 from refactor_plan.planning.proposal import RefactorPlan, SymbolMoveProposal
 from refactor_plan.execution.phases import _cleanup_empty_source_dirs, _run_file_moves
+from refactor_plan.records.manifest import write_manifest
 
 
 mcp = FastMCP(

@@ -9,7 +9,7 @@ from refactor_plan.applicator.symbol_moves import apply_symbol_move
 from refactor_plan.execution.import_rewrites import MoveRecord, add_back_import, rewrite_cross_cluster_imports
 from refactor_plan.execution.result import AppliedAction, ApplyResult, Escalation, MoveKind
 from refactor_plan.execution.phases import _run_file_moves, _path_to_module
-from refactor_plan.records.manifests import write_manifest
+from refactor_plan.records.manifest import write_manifest
 
 
 logger = logging.getLogger(__name__)

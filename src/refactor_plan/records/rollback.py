@@ -4,7 +4,7 @@ from pathlib import Path
 
 from rope.base.project import Project
 from refactor_plan.execution.result import ApplyResult, MoveStrategy
-from refactor_plan.records.manifests import read_manifest
+from refactor_plan.records.manifest import read_manifest
 
 
 def rollback(repo_root: Path, out_dir: Path) -> list[str]:
