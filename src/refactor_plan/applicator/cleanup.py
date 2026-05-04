@@ -5,6 +5,7 @@ from pathlib import Path
 import libcst as cst
 from libcst.codemod import CodemodContext
 from libcst.codemod.visitors import AddImportsVisitor
+import ast as _ast
 
 
 def ensure_future_annotations(source_path: Path) -> bool:
@@ -77,3 +78,21 @@ def pre_create_dest_module(dest_path: Path, src_root: Path) -> None:
         if not init.exists():
             pkg_dir.mkdir(parents=True, exist_ok=True)
             init.touch()
+
+
+
+
+def _all_imported_modules(path: Path) -> list[str]:
+    """Return every module name imported by path (ast-level, one hop only)."""
+    try:
+        tree = _ast.parse(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    mods: list[str] = []
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.ImportFrom) and node.module:
+            mods.append(node.module)
+        elif isinstance(node, _ast.Import):
+            for alias in node.names:
+                mods.append(alias.name)
+    return mods
