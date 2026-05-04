@@ -141,6 +141,12 @@ def _file_edge_breakdown(
         for nb in G.neighbors(n):
             if nb in my_nodes:
                 continue
+            # Only count outgoing edges using graphify's _src attribute.
+            # Incoming edges (e.g. test files importing this file) are noise
+            # for the internal-ratio metric and must be excluded.
+            edge_data = G.edges[n, nb]
+            if edge_data.get("_src", n) != n:
+                continue
             if nb in community_nodes:
                 internal += 1
             else:
