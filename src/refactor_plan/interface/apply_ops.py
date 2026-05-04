@@ -3,7 +3,7 @@
 from pathlib import Path
 import json
 import subprocess
-from .worktree import (
+from ._worktree import (
     commit_and_release, create_worktree, create_worktree_from_branch,
     discard_worktree, load_state, save_state, translate_plan,
 )

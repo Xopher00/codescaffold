@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING
 from .proposal import PendingDecision, SymbolMoveProposal, RefactorPlan
 from refactor_plan.execution import ClusterInfo
 from refactor_plan import _is_test_file, detect_layout
+from refactor_plan.interface import ClusterView
 
 if TYPE_CHECKING:
-    from refactor_plan.interface.cluster_view import ClusterView
+    pass
 
 
 logger = logging.getLogger(__name__)

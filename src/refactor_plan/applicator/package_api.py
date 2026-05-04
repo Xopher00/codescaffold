@@ -8,7 +8,7 @@ import libcst as cst
 from libcst.codemod import CodemodContext
 from libcst.codemod.visitors import AddImportsVisitor
 
-from refactor_plan.execution import MoveRecord, add_back_import, rewrite_cross_cluster_imports
+from refactor_plan.execution import _make_project, rename_module, MoveRecord, add_back_import, rewrite_cross_cluster_imports
 
 logger = logging.getLogger(__name__)
 
@@ -409,7 +409,6 @@ def _prepend_underscores(repo_root: Path, externally_imported: set[str]) -> list
     Only operates within the detected source root (e.g. src/) — never
     touches tests, fixtures, or top-level scripts.
     """
-    from refactor_plan.execution.rope_rename import _make_project, rename_module
     from refactor_plan.layout import detect_layout
 
     layout = detect_layout(repo_root)

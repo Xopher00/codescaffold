@@ -3,9 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 import networkx as nx
-
-from refactor_plan.interface.cluster_view import ClusterView
-from refactor_plan.planning.planner import plan as build_plan
+from refactor_plan.interface import ClusterView
+from refactor_plan.planning import plan as build_plan
 
 
 # ---------------------------------------------------------------------------

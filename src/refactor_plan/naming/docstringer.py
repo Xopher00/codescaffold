@@ -5,8 +5,7 @@ from pathlib import Path
 
 import libcst as cst
 import networkx as nx
-
-from refactor_plan.interface.cluster_view import ClusterView
+from refactor_plan.interface import ClusterView
 
 _MAX_RELATED = 5
 

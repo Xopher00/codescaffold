@@ -1,12 +1,7 @@
 from __future__ import annotations
 
 import networkx as nx
-
-from refactor_plan.naming.namer import (
-    _build_cluster_context,
-    _format_cluster_block,
-    _strip_code_fence,
-)
+from refactor_plan.naming import _build_cluster_context, _format_cluster_block, _strip_code_fence
 
 
 # ---------------------------------------------------------------------------

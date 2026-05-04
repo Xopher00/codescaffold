@@ -10,10 +10,9 @@ from typing import Literal
 import grimp
 import networkx as nx
 from pydantic import BaseModel
-
-from refactor_plan.interface.cluster_view import ClusterView
-from refactor_plan.layout import ProjectLayout
-from refactor_plan.planning.proposal import RefactorPlan
+from refactor_plan.interface import ClusterView
+from refactor_plan.planning import RefactorPlan
+from refactor_plan import ProjectLayout
 
 logger = logging.getLogger(__name__)
 

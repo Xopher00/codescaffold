@@ -4,18 +4,10 @@ import json
 from pathlib import Path
 
 import networkx as nx
-
-from refactor_plan.contracts.import_contracts import (
-    _derive_independence_contracts,
-    _derive_layers_contract,
-    _find_cycles,
-    _is_hand_edited,
-    check_staleness,
-    generate_contracts,
-)
-from refactor_plan.interface.cluster_view import ClusterView
-from refactor_plan.layout import ProjectLayout
-from refactor_plan.planning.proposal import RefactorPlan
+from refactor_plan.interface import ClusterView
+from refactor_plan.planning import RefactorPlan
+from refactor_plan.contracts import _derive_independence_contracts, _derive_layers_contract, _find_cycles, _is_hand_edited, check_staleness, generate_contracts
+from refactor_plan import ProjectLayout
 
 
 # ---------------------------------------------------------------------------

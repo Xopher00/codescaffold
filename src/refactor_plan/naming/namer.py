@@ -7,9 +7,10 @@ from typing import TYPE_CHECKING
 import networkx as nx
 from pydantic import BaseModel
 from refactor_plan.planning import RefactorPlan
+from refactor_plan.interface import ClusterView
 
 if TYPE_CHECKING:
-    from refactor_plan.interface.cluster_view import ClusterView
+    pass
 
 _MAX_SYMBOLS = 6    # classes or functions shown per cluster
 _MAX_DEPS = 4       # cross-cluster dependency labels shown

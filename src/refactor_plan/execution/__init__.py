@@ -12,3 +12,4 @@ from .import_rewrites import rewrite_cross_cluster_imports
 from .rope_rename import _find_symbol_offset
 from .rope_rename import rename_module
 from .rope_rename import rename_symbol
+from .rope_rename import _make_project

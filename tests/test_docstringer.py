@@ -1,12 +1,7 @@
 from __future__ import annotations
 
 import networkx as nx
-from refactor_plan.naming.docstringer import (
-    _build_symbol_context,
-    _extract_existing_docstring,
-    _get_symbol_type,
-    _insert_or_replace_docstring,
-)
+from refactor_plan.naming import _build_symbol_context, _extract_existing_docstring, _get_symbol_type, _insert_or_replace_docstring
 
 
 def _make_graph(nodes: list[dict], edges: list[tuple[str, str, dict]]) -> nx.Graph:

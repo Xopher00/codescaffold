@@ -10,9 +10,9 @@ from rope.base.exceptions import RefactoringError
 from rope.refactor.rename import Rename
 
 from .namer import RenameMap
-from refactor_plan.planning.proposal import RefactorPlan
-from refactor_plan.records.manifest import write_manifest
 from refactor_plan.execution import MoveRecord, rewrite_cross_cluster_imports, AppliedAction, ApplyResult, Escalation, MoveKind, MoveStrategy
+from refactor_plan.planning import RefactorPlan
+from refactor_plan.records import write_manifest
 
 logger = logging.getLogger(__name__)
 
