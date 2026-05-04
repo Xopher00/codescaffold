@@ -38,6 +38,15 @@ def load_state(out_dir: Path) -> dict:
         return {}
 
 
+def _clear_rope_cache(wt_path: Path) -> None:
+    """Remove stale rope history from a fresh worktree so rope re-analyses from scratch."""
+    rope_dir = wt_path / ".ropeproject"
+    for name in ("history", "history.json"):
+        p = rope_dir / name
+        if p.exists():
+            p.unlink()
+
+
 def create_worktree(repo_root: Path) -> tuple[Path, str]:
     """Create a git worktree on a fresh branch from HEAD; return (worktree_path, branch_name)."""
     ts = int(time.time())
@@ -50,6 +59,7 @@ def create_worktree(repo_root: Path) -> tuple[Path, str]:
     )
     if result.returncode != 0:
         raise RuntimeError(f"git worktree add failed: {result.stderr.strip()}")
+    _clear_rope_cache(wt_path)
     return wt_path, branch
 
 
@@ -65,6 +75,7 @@ def create_worktree_from_branch(repo_root: Path, base_branch: str) -> tuple[Path
     )
     if result.returncode != 0:
         raise RuntimeError(f"git worktree add failed: {result.stderr.strip()}")
+    _clear_rope_cache(wt_path)
     return wt_path, branch
 
 
