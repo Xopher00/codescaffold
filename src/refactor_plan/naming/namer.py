@@ -108,12 +108,7 @@ def _format_cluster_block(
 # ---------------------------------------------------------------------------
 
 def build_naming_context(refactor_plan: RefactorPlan, view: ClusterView) -> str:
-    """Return formatted cluster context for naming — no API call.
-
-    Each block lists a placeholder package's files, classes, functions, and
-    cross-cluster dependencies.  Pass the result to an LLM and ask it to
-    return a JSON map of placeholder → snake_case name.
-    """
+    """Return formatted cluster context (files, classes, functions, cross-cluster deps) for each placeholder package, ready to pass to an LLM for semantic naming."""
     clusters_with_placeholder = [
         c for c in refactor_plan.clusters if c.proposed_package
     ]
