@@ -9,8 +9,22 @@ from rope.base import libutils
 from rope.base.exceptions import RefactoringError
 from rope.refactor.rename import Rename
 from refactor_plan.execution.result import AppliedAction, Escalation, MoveKind, MoveStrategy
+from refactor_plan.layout import detect_layout
 
 logger = logging.getLogger(__name__)
+
+
+def _make_project(repo_root: Path) -> rp.Project:
+    """Create a rope Project with the correct source_folders for this repo layout."""
+    project = rp.Project(str(repo_root))
+    try:
+        layout = detect_layout(repo_root)
+        src_rel = str(layout.source_root.relative_to(repo_root))
+        project.prefs['source_folders'] = [src_rel]
+    except Exception:
+        pass
+    project.validate()
+    return project
 
 
 def rename_symbol(
@@ -42,8 +56,7 @@ def rename_symbol(
             category="rename",
         )
 
-    project = rp.Project(str(repo_root))
-    project.validate()
+    project = _make_project(repo_root)
     try:
         resource = libutils.path_to_resource(project, str(file_path))
         renamer = Rename(project, resource, offset)
@@ -116,8 +129,7 @@ def rename_module(
         kind = MoveKind.FILE
         dest = str(module_path.parent / f"{new_name}.py")
 
-    project = rp.Project(str(repo_root))
-    project.validate()
+    project = _make_project(repo_root)
     try:
         resource = libutils.path_to_resource(project, str(resource_path))
         renamer = Rename(project, resource)
