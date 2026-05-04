@@ -78,6 +78,21 @@ def _needed_imports(
     return result
 
 
+def _file_to_module(path: Path, repo_root: Path) -> str:
+    """Convert an absolute file path to a dotted module name relative to repo_root."""
+    try:
+        parts = list(path.relative_to(repo_root).parts)
+    except ValueError:
+        return ""
+    if parts and parts[0] == "src":
+        parts = parts[1:]
+    if parts and parts[-1].endswith(".py"):
+        parts[-1] = parts[-1][:-3]
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+    return ".".join(parts)
+
+
 class _SymbolRemover(cst.CSTTransformer):
     """Remove a top-level FunctionDef or ClassDef by name.
 
@@ -224,9 +239,15 @@ def apply_symbol_move(
         separator = "\n\n" if existing.rstrip() else ""
         combined = existing.rstrip() + separator + symbol_code
 
-        # Carry imports from source that the symbol references.
+        # Carry imports from source that the symbol references,
+        # excluding imports from the destination file itself (self-imports).
+        dest_module = _file_to_module(dest_abs, repo_root)
         used_names = _collect_symbol_names(symbol_code)
-        needed = _needed_imports(src_tree, used_names)
+        needed = [
+            (mod, obj, asname)
+            for mod, obj, asname in _needed_imports(src_tree, used_names)
+            if mod != dest_module
+        ]
         if needed:
             try:
                 context = CodemodContext()
