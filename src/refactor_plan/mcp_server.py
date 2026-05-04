@@ -43,7 +43,7 @@ from refactor_plan.interface.graph_bridge import ensure_graph
 from refactor_plan.interface.worktree import commit_and_release, create_worktree, create_worktree_from_branch, discard_worktree, load_state, save_state, translate_plan
 from refactor_plan.layout import detect_layout
 from refactor_plan.naming.docstringer import build_docstring_context, insert_docstring_text
-from refactor_plan.naming.name_apply import apply_rename_map as do_apply_rename_map
+from refactor_plan.naming.rename_apply import apply_rename_map as do_apply_rename_map
 from refactor_plan.naming.namer import RenameEntry, RenameMap, build_naming_context
 from refactor_plan.planning.planner import plan as build_plan, write_plan
 from refactor_plan.records.manifests import write_manifest
