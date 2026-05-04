@@ -20,19 +20,19 @@ logger = logging.getLogger(__name__)
 
 def ensure_graph(repo_root: Path) -> Path:
     out_path = repo_root / "graphify-out" / "graph.json"
+    needs_rebuild = True
     if out_path.exists():
         graph_mtime = out_path.stat().st_mtime
         newest_py = max(
             (p.stat().st_mtime for p in repo_root.rglob("*.py")),
             default=0.0,
         )
-        if newest_py > graph_mtime:
-            logger.warning(
-                "graph.json is stale — Python files have changed since last extraction. "
-                "Delete %s and re-run to refresh.",
-                out_path,
-            )
+        needs_rebuild = newest_py > graph_mtime
+
+    if not needs_rebuild:
         return out_path
+
+    logger.info("Rebuilding graph from %s …", repo_root)
     out_path.parent.mkdir(parents=True, exist_ok=True)
     paths = collect_files(repo_root)
     extraction = extract(paths, cache_root=repo_root)

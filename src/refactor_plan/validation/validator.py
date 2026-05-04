@@ -12,7 +12,7 @@ from pydantic import BaseModel
 
 logger = logging.getLogger(__name__)
 
-ValidationMode = Literal["structural", "behavioral", "all"]
+ValidationMode = Literal["structural", "installability", "behavioral", "all"]
 
 
 class CommandResult(BaseModel):
@@ -106,6 +106,14 @@ def validate(
 
     if mode == "structural":
         return _run_commands(structural_cmds, repo_root, run_env)
+
+    if mode == "installability":
+        # Smoke-test only: can we import the root package? No pytest.
+        # Used after file moves but before import rewrites.
+        if not root_package:
+            return ValidationReport(passed=True, commands=[])
+        imp_result = _importability_check(source_root, root_package)
+        return ValidationReport(passed=imp_result.exit_code == 0, commands=[imp_result])
 
     if mode == "behavioral":
         if not has_tests:

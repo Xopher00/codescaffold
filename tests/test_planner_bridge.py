@@ -368,7 +368,9 @@ def test_validate_explicit_commands_override_mode(tmp_path: Path) -> None:
 # ensure_graph — stale cache warning
 # ---------------------------------------------------------------------------
 
-def test_ensure_graph_warns_on_stale_cache(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_ensure_graph_rebuilds_when_stale(tmp_path: Path) -> None:
+    from unittest.mock import MagicMock, patch
+
     graph_out = tmp_path / "graphify-out" / "graph.json"
     graph_out.parent.mkdir(parents=True)
     graph_out.write_text('{"nodes":[],"links":[],"directed":true,"multigraph":false,"graph":{}}')
@@ -376,14 +378,22 @@ def test_ensure_graph_warns_on_stale_cache(tmp_path: Path, caplog: pytest.LogCap
     time.sleep(0.01)
     (tmp_path / "new_file.py").write_text("x = 1\n")
 
-    with caplog.at_level(logging.WARNING, logger="refactor_plan.interface.graph_bridge"):
+    fake_G = MagicMock()
+    with patch("refactor_plan.interface.graph_bridge.collect_files", return_value=[]) as mock_collect, \
+         patch("refactor_plan.interface.graph_bridge.extract", return_value={}) as mock_extract, \
+         patch("refactor_plan.interface.graph_bridge.build_from_json", return_value=fake_G), \
+         patch("refactor_plan.interface.graph_bridge.cluster", return_value={}), \
+         patch("refactor_plan.interface.graph_bridge.to_json") as mock_to_json:
         result = ensure_graph(tmp_path)
 
     assert result == graph_out
-    assert any("stale" in r.message for r in caplog.records)
+    mock_collect.assert_called_once()
+    mock_to_json.assert_called_once()
 
 
-def test_ensure_graph_no_warning_when_fresh(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+def test_ensure_graph_no_rebuild_when_fresh(tmp_path: Path) -> None:
+    from unittest.mock import patch
+
     (tmp_path / "existing.py").write_text("x = 1\n")
     time.sleep(0.01)
 
@@ -391,10 +401,10 @@ def test_ensure_graph_no_warning_when_fresh(tmp_path: Path, caplog: pytest.LogCa
     graph_out.parent.mkdir(parents=True)
     graph_out.write_text('{"nodes":[],"links":[],"directed":true,"multigraph":false,"graph":{}}')
 
-    with caplog.at_level(logging.WARNING, logger="refactor_plan.interface.graph_bridge"):
+    with patch("refactor_plan.interface.graph_bridge.collect_files") as mock_collect:
         ensure_graph(tmp_path)
 
-    assert not any("stale" in r.message for r in caplog.records)
+    mock_collect.assert_not_called()
 
 
 # ---------------------------------------------------------------------------

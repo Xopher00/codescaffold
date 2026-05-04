@@ -170,6 +170,7 @@ def analyze(repo: str = "") -> str:
         "file_moves": [m.model_dump() for m in plan.file_moves],
         "symbol_moves": [m.model_dump() for m in plan.symbol_moves],
         "communities": [c.model_dump() for c in plan.clusters],
+        "pending_decisions": [d.model_dump() for d in plan.pending_decisions],
         "surprising_connections": view.surprising_connections,
         "god_nodes": view.god_nodes[:8],
     }
@@ -430,8 +431,8 @@ def apply(repo: str = "", sandbox: bool = True) -> str:
             discard_worktree(root, wt_path, branch)
             return "FAILED (structural — after moves) — worktree discarded.\n" + _format_validation(v1)
 
-        # --- Behavioral pre-check: importability before import rewrites ---
-        v2 = do_validate(wt_path, env=wt_env, mode="behavioral", layout=layout)
+        # --- Installability check: can we import the package after moves? ---
+        v2 = do_validate(wt_path, env=wt_env, mode="installability", layout=layout)
         if not v2.passed:
             discard_worktree(root, wt_path, branch)
             return "FAILED (installability — after moves) — worktree discarded.\n" + _format_validation(v2)
@@ -644,7 +645,9 @@ def apply_rename_map(rename_map_json: str, repo: str = "", sandbox: bool = True)
             discard_worktree(root, wt_path, branch)
             return "FAILED (apply errors) — worktree discarded.\n" + _summarise_result(result)
 
-        validation = do_validate(wt_path)
+        wt_layout = detect_layout(wt_path)
+        wt_env = {"PYTHONPATH": str(wt_layout.source_root)}
+        validation = do_validate(wt_path, env=wt_env, layout=wt_layout)
         if not validation.passed:
             discard_worktree(root, wt_path, branch)
             return "FAILED (validation) — worktree discarded.\n" + _format_validation(validation)
@@ -719,7 +722,9 @@ def rename(target: str, new_name: str, repo: str = "", sandbox: bool = True) -> 
             discard_worktree(root, wt_path, branch)
             return f"FAILED: {action.reason} — worktree discarded."
 
-        validation = do_validate(wt_path)
+        wt_layout = detect_layout(wt_path)
+        wt_env = {"PYTHONPATH": str(wt_layout.source_root)}
+        validation = do_validate(wt_path, env=wt_env, layout=wt_layout)
         if not validation.passed:
             discard_worktree(root, wt_path, branch)
             return "FAILED (validation) — worktree discarded.\n" + _format_validation(validation)
