@@ -332,13 +332,54 @@ def rewrite_symbol_callers(
     return touched
 
 
+def _is_module_public(
+    mod_file: Path,
+    pkg_dir: Path,
+    repo_root: Path,
+    externally_imported: set[str],
+    project: "rp.Project",
+) -> bool:
+    """True if any code outside pkg_dir references this module.
+
+    Combines three signals:
+    1. Pass 1's externally_imported set (AST-based, catches src-layout imports)
+    2. __init__.py re-exports (module serves symbols in the package API)
+    3. Rope's Rename.get_changes (catches references rope can resolve)
+    """
+    import rope.base.project as rp
+    from rope.base import libutils
+    from rope.refactor.rename import Rename
+
+    mod_dotted = _file_to_module(mod_file, repo_root)
+    if mod_dotted in externally_imported:
+        return True
+
+    init_map = _build_init_symbol_map(pkg_dir / "__init__.py")
+    if mod_file.stem in set(init_map.values()):
+        return True
+
+    try:
+        resource = libutils.path_to_resource(project, str(mod_file))
+        renamer = Rename(project, resource)
+        changes = renamer.get_changes(f"_{mod_file.stem}")
+        pkg_dir_r = pkg_dir.resolve()
+        for c in changes.changes:
+            ref_path = (Path(project.root.real_path) / c.resource.path).resolve()
+            try:
+                ref_path.relative_to(pkg_dir_r)
+            except ValueError:
+                return True
+    except Exception:
+        pass
+
+    return False
+
+
 def _prepend_underscores(repo_root: Path, externally_imported: set[str]) -> list[str]:
     """Rename purely-internal modules: foo.py → _foo.py.
 
-    A module is internal if no file outside its package imports it.
-    externally_imported is the set of dotted module names that DO have
-    external importers (collected during pass 1). Everything else in
-    a package is private and gets the _ prefix.
+    A module is internal if no file outside its package references it —
+    not directly, not through __init__, not via any import path.
 
     Only operates within the detected source root (e.g. src/) — never
     touches tests, fixtures, or top-level scripts.
@@ -360,8 +401,7 @@ def _prepend_underscores(repo_root: Path, externally_imported: set[str]) -> list
                     continue
                 if mod_file.stem.startswith("_"):
                     continue
-                mod_dotted = _file_to_module(mod_file, repo_root)
-                if mod_dotted in externally_imported:
+                if _is_module_public(mod_file, pkg_dir, repo_root, externally_imported, project):
                     continue
                 result = rename_module(repo_root, mod_file, f"_{mod_file.stem}", project=project)
                 if hasattr(result, "dest"):
