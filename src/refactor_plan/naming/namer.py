@@ -7,7 +7,7 @@ import networkx as nx
 from pydantic import BaseModel
 
 from refactor_plan.interface.cluster_view import ClusterView
-from refactor_plan.planning.models import RefactorPlan
+from refactor_plan.planning.proposal import RefactorPlan
 
 _MAX_SYMBOLS = 6    # classes or functions shown per cluster
 _MAX_DEPS = 4       # cross-cluster dependency labels shown

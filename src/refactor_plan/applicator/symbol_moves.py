@@ -8,7 +8,7 @@ import libcst as cst
 import rope.base.project as rp
 from libcst.codemod import CodemodContext
 from libcst.codemod.visitors import AddImportsVisitor
-from refactor_plan.execution.models import AppliedAction, Escalation, MoveKind, MoveStrategy
+from refactor_plan.execution.result import AppliedAction, Escalation, MoveKind, MoveStrategy
 
 logger = logging.getLogger(__name__)
 

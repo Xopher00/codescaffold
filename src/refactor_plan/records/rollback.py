@@ -3,7 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from rope.base.project import Project
-from refactor_plan.execution.models import ApplyResult, MoveStrategy
+from refactor_plan.execution.result import ApplyResult, MoveStrategy
 from refactor_plan.records.manifests import read_manifest
 
 

@@ -1,7 +1,7 @@
 
 
 from pydantic import BaseModel
-from refactor_plan.execution.models import ClusterInfo, FileMoveProposal
+from refactor_plan.execution.result import ClusterInfo, FileMoveProposal
 
 class SymbolMoveProposal(BaseModel):
     """Proposal to extract a single named symbol from one file into another, generated from graph clustering evidence."""

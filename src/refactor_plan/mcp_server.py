@@ -36,7 +36,7 @@ from refactor_plan.contracts.import_contracts import (
     generate_contracts as do_generate_contracts,
 )
 from refactor_plan.execution.apply import _ensure_package_inits, _run_import_rewrites, apply_plan as do_apply_plan
-from refactor_plan.execution.models import FileMoveProposal, AppliedAction, ApplyResult, Escalation
+from refactor_plan.execution.result import FileMoveProposal, AppliedAction, ApplyResult, Escalation
 from refactor_plan.execution.rope_rename import rename_module as do_rename_module, rename_symbol as do_rename_symbol
 from refactor_plan.interface.cluster_view import build_view
 from refactor_plan.interface.graph_bridge import ensure_graph
@@ -51,7 +51,7 @@ from refactor_plan.records.rollback import rollback as do_rollback
 from refactor_plan.reporting.reporter import render_dry_run_report, write_report
 from refactor_plan.validation.validator import validate as do_validate
 from refactor_plan.reporting.cluster_context import _format_pending_decisions
-from refactor_plan.planning.models import RefactorPlan, SymbolMoveProposal
+from refactor_plan.planning.proposal import RefactorPlan, SymbolMoveProposal
 from refactor_plan.execution.phases import _cleanup_empty_source_dirs, _run_file_moves
 
 

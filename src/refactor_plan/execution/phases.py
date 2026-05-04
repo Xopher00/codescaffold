@@ -1,7 +1,7 @@
 
 
 from pathlib import Path
-from refactor_plan.execution.models import Escalation, AppliedAction, MoveKind
+from refactor_plan.execution.result import Escalation, AppliedAction, MoveKind
 import rope.base.project as rp
 from refactor_plan.applicator.file_moves import apply_file_move
 

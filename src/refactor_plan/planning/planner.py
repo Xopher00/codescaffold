@@ -3,10 +3,10 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from refactor_plan.execution.models import ClusterInfo
+from refactor_plan.execution.result import ClusterInfo
 from refactor_plan.interface.cluster_view import ClusterView
 from refactor_plan.layout import detect_layout, _is_test_file
-from refactor_plan.planning.models import RefactorPlan, PendingDecision, SymbolMoveProposal
+from refactor_plan.planning.proposal import RefactorPlan, PendingDecision, SymbolMoveProposal
 
 
 logger = logging.getLogger(__name__)
