@@ -41,7 +41,7 @@ from refactor_plan.interface.cluster_view import ClusterView, build_view
 from refactor_plan.interface.graph_bridge import ensure_graph
 from refactor_plan.naming.docstringer import build_docstring_context, insert_docstring_text
 from refactor_plan.naming.namer import RenameEntry, RenameMap, build_naming_context
-from refactor_plan.planning.planner import FileMoveProposal, RefactorPlan
+from refactor_plan.planning.planner import RefactorPlan
 from refactor_plan.planning.planner import plan as build_plan
 from refactor_plan.planning.planner import write_plan
 from refactor_plan.reporting.reporter import render_dry_run_report, write_report
@@ -51,7 +51,7 @@ from refactor_plan.interface.worktree import commit_and_release, create_worktree
 from refactor_plan.execution.apply import _cleanup_empty_source_dirs, _ensure_package_inits, _run_file_moves, _run_import_rewrites, apply_plan as do_apply_plan
 from refactor_plan.execution.rope_rename import rename_module as do_rename_module, rename_symbol as do_rename_symbol
 from refactor_plan.records.rollback import rollback as do_rollback
-from refactor_plan.execution.models import AppliedAction, ApplyResult, Escalation
+from refactor_plan.execution.models import FileMoveProposal, AppliedAction, ApplyResult, Escalation
 from refactor_plan.records.manifests import write_manifest
 
 mcp = FastMCP(

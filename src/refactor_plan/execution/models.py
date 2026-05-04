@@ -60,3 +60,19 @@ class ApplyResult(BaseModel):
     skipped: list[Escalation] = []
     failed: list[Escalation] = []
     blocked: list[Escalation] = []
+
+
+
+class FileMoveProposal(BaseModel):
+    source: str
+    dest: str
+    dest_package: str
+
+
+
+class ClusterInfo(BaseModel):
+    community_id: int
+    source_files: list[str]
+    proposed_package: str | None = None
+    cohesion: float | None = None
+    risk_level: str | None = None  # LOW / MEDIUM / HIGH based on cohesion score
