@@ -1,12 +1,12 @@
-
-
-import os
-from pathlib import Path
-from refactor_plan.planning.proposal import RefactorPlan
-from refactor_plan.execution.result import ApplyResult
 import hashlib
 import json
-import ast as _ast
+import os
+from pathlib import Path
+
+from refactor_plan.execution.result import ApplyResult
+from refactor_plan.planning.proposal import RefactorPlan
+from refactor_plan.applicator.cleanup import _all_imported_modules
+
 
 _OUT_DIR = ".refactor_plan"
 
@@ -113,23 +113,6 @@ def _sandbox_result(branch: str, summary: str) -> str:
         f"Apply  : git merge {branch}\n"
         f"Discard: git branch -D {branch}"
     )
-
-
-
-def _all_imported_modules(path: Path) -> list[str]:
-    """Return every module name imported by path (ast-level, one hop only)."""
-    try:
-        tree = _ast.parse(path.read_text(encoding="utf-8"))
-    except Exception:
-        return []
-    mods: list[str] = []
-    for node in _ast.walk(tree):
-        if isinstance(node, _ast.ImportFrom) and node.module:
-            mods.append(node.module)
-        elif isinstance(node, _ast.Import):
-            for alias in node.names:
-                mods.append(alias.name)
-    return mods
 
 
 
