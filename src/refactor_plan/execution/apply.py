@@ -5,12 +5,12 @@ from pathlib import Path
 from typing import Literal
 
 import rope.base.project as rp
-
 from refactor_plan.applicator.file_moves import apply_file_move
 from refactor_plan.applicator.symbol_moves import apply_symbol_move
 from refactor_plan.execution.import_rewrites import MoveRecord, add_back_import, rewrite_cross_cluster_imports
 from refactor_plan.execution.models import AppliedAction, ApplyResult, Escalation, MoveKind
 from refactor_plan.records.manifests import write_manifest
+from refactor_plan.execution.phases import _path_to_module
 
 
 logger = logging.getLogger(__name__)
@@ -250,31 +250,3 @@ def apply_plan(
         write_manifest(result, out_dir)
 
     return result
-
-
-def _path_to_module(
-    path: Path,
-    repo_root: Path,
-    src_root: Path | None = None,
-) -> str | None:
-    try:
-        if src_root is not None:
-            try:
-                parts = list(path.relative_to(src_root).parts)
-            except ValueError:
-                parts = list(path.relative_to(repo_root).parts)
-        else:
-            rel = path.relative_to(repo_root)
-            parts = list(rel.parts)
-            if parts and parts[0] == "src":
-                parts = parts[1:]
-    except ValueError:
-        return None
-
-    if not parts:
-        return None
-    if parts[-1].endswith(".py"):
-        parts[-1] = parts[-1][:-3]
-        if parts[-1] == "__init__":
-            parts = parts[:-1]
-    return ".".join(parts) if parts else None
