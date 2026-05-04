@@ -8,8 +8,7 @@ import rope.base.project as rp
 from rope.base import libutils
 from rope.base.exceptions import RefactoringError
 from rope.refactor.rename import Rename
-
-from refactor_plan.applicator.execution.models import AppliedAction, Escalation, MoveKind, MoveStrategy
+from refactor_plan.execution.models import AppliedAction, Escalation, MoveKind, MoveStrategy
 
 logger = logging.getLogger(__name__)
 

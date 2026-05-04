@@ -47,11 +47,11 @@ from refactor_plan.reporting.reporter import render_dry_run_report, write_report
 from refactor_plan.validation.validator import validate as do_validate
 from refactor_plan.naming.name_apply import apply_rename_map as do_apply_rename_map
 from refactor_plan.interface.worktree import commit_and_release, create_worktree, create_worktree_from_branch, discard_worktree, load_state, save_state, translate_plan
-from refactor_plan.applicator.execution.apply import _ensure_package_inits, _run_file_moves, _run_import_rewrites, apply_plan as do_apply_plan
-from refactor_plan.applicator.execution.rope_rename import rename_module as do_rename_module, rename_symbol as do_rename_symbol
-from refactor_plan.applicator.records.rollback import rollback as do_rollback
-from refactor_plan.applicator.execution.models import AppliedAction, ApplyResult, Escalation
-from refactor_plan.applicator.records.manifests import write_manifest
+from refactor_plan.execution.apply import _ensure_package_inits, _run_file_moves, _run_import_rewrites, apply_plan as do_apply_plan
+from refactor_plan.execution.rope_rename import rename_module as do_rename_module, rename_symbol as do_rename_symbol
+from refactor_plan.records.rollback import rollback as do_rollback
+from refactor_plan.execution.models import AppliedAction, ApplyResult, Escalation
+from refactor_plan.records.manifests import write_manifest
 
 mcp = FastMCP(
     "codescaffold",

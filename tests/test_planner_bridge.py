@@ -16,7 +16,7 @@ from refactor_plan.layout import (
 from refactor_plan.planning.planner import plan as build_plan
 from refactor_plan.interface.cluster_view import ClusterView
 import networkx as nx
-from refactor_plan.applicator.execution.apply import _ensure_package_inits, apply_plan
+from refactor_plan.execution.apply import _ensure_package_inits, apply_plan
 
 
 # ---------------------------------------------------------------------------
