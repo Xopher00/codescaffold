@@ -24,6 +24,33 @@ Also review graphify’s MCP/server interface, especially `graphify/serve.py`, b
 
 ## Current status (as of 2026-05-04)
 
+### Session summary — attempted file moves, reverted (2026-05-04)
+
+**What was attempted:** `reporting/analysis.py` → `interface/analysis.py` (graph evidence: 17/20 edges internal to interface).
+
+**What broke:**
+1. `normalize_package_imports` runs automatically after every file move. It updated `reporting/__init__.py` to re-export the moved symbols from their new location (`from refactor_plan.interface.analysis import analyze`, etc.). This created a circular import: `interface/analysis.py` → `reporting._reporter` → `reporting.__init__` → `interface/analysis.py`.
+2. Rope dropped two imports from `analysis.py` during the move (`ensure_graph` from `graph_bridge`, `build_view` from `cluster_view`). The file compiled but the server failed at runtime.
+3. Neither failure was caught by the sandbox `pytest` run because tests don't exercise the server startup path.
+
+**Reverted.** Codebase is at commit `48bd52d`. `reporting/analysis.py` is back in place. 138 tests pass. MCP server imports clean.
+
+**Root cause of validation gap:** The sandbox validation chain runs `python -c 'import refactor_plan'` and `pytest`. Neither exercises `mcp_server.py`'s full import chain. A third check is needed:
+
+```
+python -c 'import refactor_plan.mcp_server'
+```
+
+This must be added to the `validate` tool's command list before any further file moves are attempted in the `interface/` or `reporting/` packages.
+
+**Second root cause — normalize after moves:** `normalize_package_imports` runs unconditionally after every successful file move in `_run_file_moves`. When a file moves between packages that have cross-imports, normalize can introduce circular re-exports. The normalize pass needs to detect and skip re-exports that would create import cycles.
+
+**Symbol moves skipped:** `_run_import_rewrites` (`execution/apply.py` → `execution/import_rewrites.py`) was attempted and failed — the LibCST import carry-over wrote a bare `from file_phase import _path_to_module` instead of a relative `from .file_phase import _path_to_module`. The symbol move tool's import carry-over does not preserve relative import style.
+
+**Successful move:** `_check_circular_import_risks` symbol move was not attempted after the file move issues. Left for next session.
+
+---
+
 The MCP server is registered as `codescaffold-mcp`.
 
 Destructive tools use git worktree sandboxes under `/tmp/codescaffold_<ts>`. `sandbox=True` is the default. On success, changes are committed in the sandbox. On failure, the sandbox is discarded.
