@@ -8,7 +8,7 @@ import rope.base.project as rp
 
 from refactor_plan.applicator.file_moves import apply_file_move
 from refactor_plan.applicator.symbol_moves import apply_symbol_move
-from refactor_plan.execution.import_rewrites import MoveRecord, rewrite_cross_cluster_imports
+from refactor_plan.execution.import_rewrites import MoveRecord, add_back_import, rewrite_cross_cluster_imports
 from refactor_plan.execution.models import AppliedAction, ApplyResult, Escalation, MoveKind
 from refactor_plan.records.manifests import write_manifest
 
@@ -144,6 +144,21 @@ def _run_import_rewrites(
                     reason=str(exc),
                     category="import_rewrite",
                 ))
+
+    # Back-imports: if a symbol was moved out of a file but the file still
+    # references it (type annotations, default values, etc.), add the new import.
+    for action in applied:
+        if action.kind != MoveKind.SYMBOL or not action.symbol:
+            continue
+        src_file = Path(action.source)
+        if not src_file.exists():
+            continue
+        new_mod = _path_to_module(Path(action.dest), repo_root, src_root)
+        if new_mod:
+            try:
+                add_back_import(src_file, action.symbol, new_mod)
+            except Exception as exc:
+                logger.warning("back-import failed for %s: %s", src_file, exc)
 
     return move_records, skipped
 

@@ -89,6 +89,26 @@ class _CrossClusterImportRewriter(cst.CSTTransformer):
         return updated_node
 
 
+def add_back_import(target_file: Path, symbol: str, new_module: str) -> bool:
+    """Add `from new_module import symbol` to target_file if symbol still appears there.
+
+    Used after a symbol move to keep the source file compilable when it still
+    references the moved symbol in type annotations or class bodies.
+    """
+    source = target_file.read_text(encoding="utf-8")
+    if symbol not in source:
+        return False
+    context = CodemodContext()
+    tree = cst.parse_module(source)
+    AddImportsVisitor.add_needed_import(context, new_module, symbol)
+    tree = AddImportsVisitor(context).transform_module(tree)
+    result = tree.code
+    if result == source:
+        return False
+    target_file.write_text(result, encoding="utf-8")
+    return True
+
+
 def rewrite_cross_cluster_imports(target_file: Path, moves: list[MoveRecord]) -> bool:
     source = target_file.read_text(encoding="utf-8")
     context = CodemodContext()
