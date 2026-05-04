@@ -173,18 +173,17 @@ def _check_circular_import_risks(
             if m == src_module or m.startswith(src_module + ".")
         ]
         if colliding:
-            # Check if symbol is referenced in the source outside its definition
-            src_text = src_path.read_text(encoding="utf-8")
+            # Only a real cycle if add_back_import would fire — which it does
+            # when the symbol name still appears in the source after removal.
+            # Simulate exactly what add_back_import checks.
             try:
-                src_ast = _ast.parse(src_text)
-                refs = [
-                    n for n in _ast.walk(src_ast)
-                    if isinstance(n, _ast.Name) and n.id == symbol_name
-                ]
-                # More than one reference means it's called somewhere (the definition itself is one)
-                # Actually definitions aren't Name nodes — any Name match means a call/reference
-                still_referenced = len(refs) > 0
-            except SyntaxError:
+                import libcst as cst
+                from refactor_plan.applicator.symbol_moves import _remove_symbol
+                src_text = src_path.read_text(encoding="utf-8")
+                src_tree = cst.parse_module(src_text)
+                modified = _remove_symbol(src_tree, symbol_name).code
+                still_referenced = symbol_name in modified
+            except Exception:
                 still_referenced = True  # conservative
             if still_referenced:
                 risks.append(
