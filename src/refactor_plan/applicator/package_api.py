@@ -34,6 +34,9 @@ def _resolve_module_to_path(module: str, repo_root: Path) -> Path | None:
         candidate = base.joinpath(*parts).with_suffix(".py")
         if candidate.exists():
             return candidate.resolve()
+        pkg_init = base.joinpath(*parts) / "__init__.py"
+        if pkg_init.exists():
+            return pkg_init.resolve()
     return None
 
 
@@ -341,21 +344,16 @@ def _is_module_public(
 ) -> bool:
     """True if any code outside pkg_dir references this module.
 
-    Combines three signals:
-    1. Pass 1's externally_imported set (AST-based, catches src-layout imports)
-    2. __init__.py re-exports (module serves symbols in the package API)
-    3. Rope's Rename.get_changes (catches references rope can resolve)
+    Combines two signals:
+    1. externally_imported set (AST scan covering both `from pkg.mod import X`
+       and `from pkg import X` resolved through __init__)
+    2. Rope's Rename.get_changes (catches references rope can resolve)
     """
-    import rope.base.project as rp
     from rope.base import libutils
     from rope.refactor.rename import Rename
 
     mod_dotted = _file_to_module(mod_file, repo_root)
     if mod_dotted in externally_imported:
-        return True
-
-    init_map = _build_init_symbol_map(pkg_dir / "__init__.py")
-    if mod_file.stem in set(init_map.values()):
         return True
 
     try:
@@ -373,6 +371,33 @@ def _is_module_public(
         pass
 
     return False
+
+
+def _strip_init_reexports(init_path: Path, stem: str) -> bool:
+    """Remove `from .stem import ...` lines from __init__.py. Returns True if modified."""
+    try:
+        source = init_path.read_text(encoding="utf-8")
+        tree = cst.parse_module(source)
+    except Exception:
+        return False
+
+    class _Stripper(cst.CSTTransformer):
+        def __init__(self) -> None:
+            self.removed = False
+
+        def leave_ImportFrom(self, original_node: cst.ImportFrom, updated_node: cst.ImportFrom) -> cst.BaseSmallStatement | cst.RemovalSentinel:
+            if not updated_node.relative or updated_node.module is None:
+                return updated_node
+            if isinstance(updated_node.module, cst.Name) and updated_node.module.value == stem:
+                self.removed = True
+                return cst.RemoveFromParent()
+            return updated_node
+
+    stripper = _Stripper()
+    new_tree = tree.visit(stripper)
+    if stripper.removed:
+        init_path.write_text(new_tree.code, encoding="utf-8")
+    return stripper.removed
 
 
 def _prepend_underscores(repo_root: Path, externally_imported: set[str]) -> list[str]:
@@ -395,6 +420,8 @@ def _prepend_underscores(repo_root: Path, externally_imported: set[str]) -> list
     try:
         for init_path in sorted(src_root.rglob("__init__.py")):
             pkg_dir = init_path.parent
+            if pkg_dir.parent == src_root:
+                continue  # top-level package — contains entrypoints, not internals
 
             for mod_file in sorted(pkg_dir.glob("*.py")):
                 if mod_file.name == "__init__.py":
@@ -403,6 +430,10 @@ def _prepend_underscores(repo_root: Path, externally_imported: set[str]) -> list
                     continue
                 if _is_module_public(mod_file, pkg_dir, repo_root, externally_imported, project):
                     continue
+                if _strip_init_reexports(init_path, mod_file.stem):
+                    s = str(init_path)
+                    if s not in touched:
+                        touched.append(s)
                 result = rename_module(repo_root, mod_file, f"_{mod_file.stem}", project=project)
                 if hasattr(result, "dest"):
                     touched.append(result.dest)
@@ -430,8 +461,14 @@ def normalize_package_imports(repo_root: Path) -> list[str]:
     """
     py_files = sorted(repo_root.rglob("*.py"))
 
-    # Pass 1: cross-package normalization
+    # Scan: find all modules referenced from outside their package.
+    # Two forms:
+    #   1. from pkg.module import X  → direct deep import (needs rewriting)
+    #   2. from pkg import X         → already through __init__ (no rewrite needed,
+    #      but the submodule serving X is still externally used)
     rewrites: dict[tuple[str, str], set[str]] = {}
+    externally_imported: set[str] = set()
+
     for py_file in py_files:
         try:
             tree = _ast.parse(py_file.read_text(encoding="utf-8"))
@@ -459,14 +496,29 @@ def normalize_package_imports(repo_root: Path) -> list[str]:
                 pass
 
             pkg_module = _file_to_module(pkg_dir / "__init__.py", repo_root)
-            if not pkg_module or pkg_module == node.module:
+            if not pkg_module:
                 continue
 
+            if pkg_module == node.module:
+                # from pkg import X — already through __init__. Mark the serving
+                # submodules as externally used (they're part of the public API).
+                init_map = _build_init_symbol_map(pkg_dir / "__init__.py")
+                for alias in node.names:
+                    sym = alias.name
+                    stem = init_map.get(sym)
+                    if stem:
+                        sub_file = pkg_dir / f"{stem}.py"
+                        sub_mod = _file_to_module(sub_file, repo_root)
+                        if sub_mod:
+                            externally_imported.add(sub_mod)
+                continue
+
+            # from pkg.module import X — direct deep import, needs rewriting
+            externally_imported.add(node.module)
             for alias in node.names:
                 rewrites.setdefault((node.module, pkg_module), set()).add(alias.name)
 
     touched: list[str] = []
-    externally_imported: set[str] = {src_mod for src_mod, _pkg_mod in rewrites}
     for (src_module, pkg_module), symbols in rewrites.items():
         module_path = _resolve_module_to_path(src_module, repo_root)
         if module_path is None:
