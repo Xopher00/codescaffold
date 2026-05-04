@@ -8,3 +8,7 @@ build/
 dist/
 .pytest_cache/
 .ruff_cache/
+.ropeproject/
+.importlinter
+.refactor_plan_team_config.json
+.claude/
