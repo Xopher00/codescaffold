@@ -4,8 +4,7 @@ import json
 import subprocess
 import time
 from pathlib import Path
-
-from refactor_plan.planning.planner import RefactorPlan
+from refactor_plan.planning.models import RefactorPlan
 
 _STATE_FILE = "state.json"
 

@@ -3,43 +3,13 @@ from __future__ import annotations
 import logging
 from pathlib import Path
 
-from pydantic import BaseModel
+from refactor_plan.execution.models import ClusterInfo
 from refactor_plan.interface.cluster_view import ClusterView
 from refactor_plan.layout import detect_layout, _is_test_file
-from refactor_plan.execution.models import ClusterInfo, FileMoveProposal
+from refactor_plan.planning.models import RefactorPlan, PendingDecision, SymbolMoveProposal
 
 
 logger = logging.getLogger(__name__)
-
-
-class SymbolMoveProposal(BaseModel):
-    source: str
-    dest: str
-    symbol: str
-    approved: bool = False
-
-
-class PendingDecision(BaseModel):
-    community_id: int
-    source_files: list[str]
-    current_dirs: dict[str, list[str]]  # dir_path → [file_paths]
-    needs_placement: bool               # True when files span multiple directories
-    cohesion: float | None
-    risk_level: str
-    cross_cluster_edges: list[dict]     # top edges leaving this community
-    surprising_connections: list[dict]  # surprising_connections entries for files here
-
-
-class RefactorPlan(BaseModel):
-    file_moves: list[FileMoveProposal] = []       # populated by approve_moves, not plan()
-    symbol_moves: list[SymbolMoveProposal] = []
-    clusters: list[ClusterInfo] = []
-    pending_decisions: list[PendingDecision] = []
-    source_root: str | None = None
-    validation_commands: list[str] = [
-        "python -m compileall .",
-        "pytest -q",
-    ]
 
 
 def _risk_level(cohesion: float | None) -> str:

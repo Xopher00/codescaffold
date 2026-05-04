@@ -45,12 +45,13 @@ from refactor_plan.layout import detect_layout
 from refactor_plan.naming.docstringer import build_docstring_context, insert_docstring_text
 from refactor_plan.naming.name_apply import apply_rename_map as do_apply_rename_map
 from refactor_plan.naming.namer import RenameEntry, RenameMap, build_naming_context
-from refactor_plan.planning.planner import RefactorPlan, plan as build_plan, write_plan
+from refactor_plan.planning.planner import plan as build_plan, write_plan
 from refactor_plan.records.manifests import write_manifest
 from refactor_plan.records.rollback import rollback as do_rollback
 from refactor_plan.reporting.reporter import render_dry_run_report, write_report
 from refactor_plan.validation.validator import validate as do_validate
 from refactor_plan.reporting.cluster_context import _format_pending_decisions
+from refactor_plan.planning.models import RefactorPlan, SymbolMoveProposal
 
 
 mcp = FastMCP(
@@ -286,8 +287,6 @@ def approve_symbol_moves(moves_json: str, repo: str = "") -> str:
             m.approved = False
         write_plan(plan, _plan_path(root))
         return "Symbol move approvals cleared."
-
-    from refactor_plan.planning.planner import SymbolMoveProposal
     import ast
 
     proposals: list[SymbolMoveProposal] = []
