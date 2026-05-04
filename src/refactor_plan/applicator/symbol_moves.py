@@ -1,13 +1,81 @@
 from __future__ import annotations
 
+import ast as _ast
 import logging
 from pathlib import Path
 
 import libcst as cst
 import rope.base.project as rp
+from libcst.codemod import CodemodContext
+from libcst.codemod.visitors import AddImportsVisitor
 from refactor_plan.execution.models import AppliedAction, Escalation, MoveKind, MoveStrategy
 
 logger = logging.getLogger(__name__)
+
+
+def _dotted(node: cst.BaseExpression) -> str:
+    if isinstance(node, cst.Name):
+        return node.value
+    if isinstance(node, cst.Attribute):
+        return f"{_dotted(node.value)}.{node.attr.value}"
+    return ""
+
+
+def _collect_symbol_names(symbol_code: str) -> set[str]:
+    """Return every bare name referenced in the symbol body."""
+    try:
+        tree = _ast.parse(symbol_code)
+        names: set[str] = set()
+        for node in _ast.walk(tree):
+            if isinstance(node, _ast.Name):
+                names.add(node.id)
+            elif isinstance(node, _ast.Attribute):
+                val = node.value
+                while isinstance(val, _ast.Attribute):
+                    val = val.value
+                if isinstance(val, _ast.Name):
+                    names.add(val.id)
+        return names
+    except SyntaxError:
+        return set()
+
+
+def _needed_imports(
+    src_tree: cst.Module, used_names: set[str]
+) -> list[tuple[str, str | None, str | None]]:
+    """Return (module, obj, asname) tuples for imports in src_tree that export a name in used_names.
+
+    obj=None means a bare `import module` statement.
+    """
+    result: list[tuple[str, str | None, str | None]] = []
+    for stmt in src_tree.body:
+        if not isinstance(stmt, cst.SimpleStatementLine):
+            continue
+        for small in stmt.body:
+            if isinstance(small, cst.ImportFrom):
+                if small.module is None or isinstance(small.names, cst.ImportStar):
+                    continue
+                mod = _dotted(small.module)
+                for alias in small.names:
+                    obj = alias.name.value if isinstance(alias.name, cst.Name) else _dotted(alias.name)
+                    asname = None
+                    if alias.asname is not None and isinstance(alias.asname, cst.AsName):
+                        inner = alias.asname.name
+                        asname = inner.value if isinstance(inner, cst.Name) else None
+                    local_name = asname if asname else obj
+                    if local_name in used_names:
+                        result.append((mod, obj, asname))
+            elif isinstance(small, cst.Import) and not isinstance(small.names, cst.ImportStar):
+                for alias in small.names:  # type: ignore[union-attr]
+                    mod = alias.name.value if isinstance(alias.name, cst.Name) else _dotted(alias.name)
+                    asname = None
+                    if alias.asname is not None and isinstance(alias.asname, cst.AsName):
+                        inner = alias.asname.name
+                        asname = inner.value if isinstance(inner, cst.Name) else None
+                    local_name = asname if asname else mod
+                    if local_name in used_names:
+                        result.append((mod, None, asname))
+    return result
 
 
 class _SymbolRemover(cst.CSTTransformer):
@@ -149,15 +217,28 @@ def apply_symbol_move(
             reason=f"Cannot write modified source: {exc}",
         )
 
-    # Append symbol code to destination (create if missing)
+    # Append symbol code to destination (create if missing), carrying needed imports.
     try:
         dest_abs.parent.mkdir(parents=True, exist_ok=True)
-        if dest_abs.exists():
-            existing = dest_abs.read_text(encoding="utf-8")
-            separator = "\n\n" if existing.rstrip() else ""
-            dest_abs.write_text(existing.rstrip() + separator + symbol_code, encoding="utf-8")
-        else:
-            dest_abs.write_text(symbol_code, encoding="utf-8")
+        existing = dest_abs.read_text(encoding="utf-8") if dest_abs.exists() else ""
+        separator = "\n\n" if existing.rstrip() else ""
+        combined = existing.rstrip() + separator + symbol_code
+
+        # Carry imports from source that the symbol references.
+        used_names = _collect_symbol_names(symbol_code)
+        needed = _needed_imports(src_tree, used_names)
+        if needed:
+            try:
+                context = CodemodContext()
+                tree = cst.parse_module(combined)
+                for mod, obj, asname in needed:
+                    AddImportsVisitor.add_needed_import(context, mod, obj, asname)
+                tree = AddImportsVisitor(context).transform_module(tree)
+                combined = tree.code
+            except Exception as exc:
+                logger.warning("import carry-over failed for %s: %s", dest_abs, exc)
+
+        dest_abs.write_text(combined, encoding="utf-8")
     except OSError as exc:
         # Attempt rollback of source before returning failure
         try:

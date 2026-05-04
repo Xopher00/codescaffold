@@ -1,7 +1,11 @@
 from __future__ import annotations
 
 from pathlib import Path
+
+import networkx as nx
 from refactor_plan.execution.models import ApplyResult, MoveKind, MoveStrategy
+from refactor_plan.interface.cluster_view import ClusterView
+from refactor_plan.planning.planner import RefactorPlan
 
 
 def _risk(kind: str, source: str, dest: str) -> str:
