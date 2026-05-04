@@ -32,6 +32,7 @@ from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
 
+from refactor_plan.applicator.apply import apply_plan as do_apply_plan
 from refactor_plan.applicator.models import AppliedAction, ApplyResult, Escalation
 from refactor_plan.applicator.name_apply import apply_rename_map as do_apply_rename_map
 from refactor_plan.applicator.rollback import rollback as do_rollback
@@ -113,8 +114,11 @@ def _format_validation(report: object) -> str:
     for cmd in report.commands:  # type: ignore[union-attr]
         mark = "OK" if cmd.exit_code == 0 else "FAIL"
         lines.append(f"  [{mark}] {cmd.command}")
-        if cmd.exit_code != 0 and cmd.stderr:
-            lines.append(cmd.stderr[:400])
+        if cmd.exit_code != 0:
+            if cmd.stdout:
+                lines.append(cmd.stdout[-600:])
+            if cmd.stderr:
+                lines.append(cmd.stderr[:400])
     return "\n".join(lines)
 
 
@@ -181,6 +185,70 @@ def rollback(repo: str = "") -> str:
     root = _repo(repo)
     actions = do_rollback(root, _out_dir(root))
     return "\n".join(actions) if actions else "Nothing to roll back."
+
+
+@mcp.tool()
+def apply(repo: str = "", sandbox: bool = True) -> str:
+    """Apply the refactor plan (file moves + symbol moves + import rewrites).
+
+    With sandbox=True (default), runs in a git worktree, validates, then commits
+    to a branch for review.  Merge with:
+        git merge <branch>
+    Pass sandbox=False to apply directly to the working tree.
+    """
+    root = _repo(repo)
+    plan = _load_plan(root)
+    plan_dict = {
+        "file_moves": [
+            {"source": m.source, "dest": m.dest, "dest_package": m.dest_package}
+            for m in plan.file_moves
+        ],
+        "symbol_moves": [
+            {"source": m.source, "dest": m.dest, "symbol": m.symbol}
+            for m in plan.symbol_moves
+            if m.approved
+        ],
+    }
+
+    if not sandbox:
+        result = do_apply_plan(plan_dict, root, _out_dir(root))
+        return _summarise_result(result)
+
+    wt_path, branch = create_worktree(root)
+    try:
+        wt_plan = translate_plan(plan, root, wt_path)
+        wt_out = _out_dir(wt_path)
+        wt_out.mkdir(parents=True, exist_ok=True)
+        write_plan(wt_plan, wt_out / "refactor_plan.json")
+        wt_plan_dict = {
+            "file_moves": [
+                {"source": m.source, "dest": m.dest, "dest_package": m.dest_package}
+                for m in wt_plan.file_moves
+            ],
+            "symbol_moves": [
+                {"source": m.source, "dest": m.dest, "symbol": m.symbol}
+                for m in wt_plan.symbol_moves
+                if m.approved
+            ],
+        }
+        result = do_apply_plan(wt_plan_dict, wt_path, wt_out)
+
+        if result.failed:
+            discard_worktree(root, wt_path, branch)
+            return "FAILED (apply errors) — worktree discarded.\n" + _summarise_result(result)
+
+        # Prepend the worktree's src/ so new pkg_NNN packages shadow the original install
+        wt_src = str(wt_path / "src")
+        validation = do_validate(wt_path, env={"PYTHONPATH": wt_src})
+        if not validation.passed:
+            discard_worktree(root, wt_path, branch)
+            return "FAILED (validation) — worktree discarded.\n" + _format_validation(validation)
+
+        commit_and_release(root, wt_path, "refactor: apply file moves")
+        return _sandbox_result(branch, _summarise_result(result))
+    except Exception:
+        discard_worktree(root, wt_path, branch)
+        raise
 
 
 # ---------------------------------------------------------------------------

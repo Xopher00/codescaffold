@@ -92,10 +92,16 @@ def plan(view: ClusterView, repo_root: Path, graph_json: Path) -> RefactorPlan:
 
         for sf in source_files:
             sf_path = Path(sf)
+            if not sf_path.is_absolute():
+                sf_path = (repo_root / sf_path).resolve()
+            if sf_path.name == "__init__.py":
+                continue
+            if _TEST_PARTS.intersection(sf_path.parts):
+                continue
             if sf_path.parent != target_dir:
                 dest = str(target_dir / sf_path.name)
                 file_moves.append(FileMoveProposal(
-                    source=sf,
+                    source=str(sf_path),
                     dest=dest,
                     dest_package=str(target_dir),
                 ))

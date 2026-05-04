@@ -29,9 +29,13 @@ _DEFAULT_COMMANDS = [
 def validate(
     repo_root: Path,
     commands: list[str] | None = None,
+    env: dict[str, str] | None = None,
 ) -> ValidationReport:
     cmds = commands if commands is not None else _DEFAULT_COMMANDS
     results: list[CommandResult] = []
+
+    import os
+    run_env = {**os.environ, **(env or {})}
 
     all_passed = True
     for cmd in cmds:
@@ -40,6 +44,7 @@ def validate(
             cwd=str(repo_root),
             capture_output=True,
             text=True,
+            env=run_env,
         )
         results.append(CommandResult(
             command=cmd,

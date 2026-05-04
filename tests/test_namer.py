@@ -5,7 +5,7 @@ import networkx as nx
 from refactor_plan.naming.namer import (
     _build_cluster_context,
     _format_cluster_block,
-    _strip_json_fence,
+    _strip_code_fence,
 )
 
 
@@ -27,21 +27,21 @@ def _node(nid: str, label: str, source_file: str) -> dict:
 
 
 # ---------------------------------------------------------------------------
-# _strip_json_fence
+# _strip_code_fence
 # ---------------------------------------------------------------------------
 
-def test_strip_json_fence_bare() -> None:
-    assert _strip_json_fence('{"a": "b"}') == '{"a": "b"}'
+def test_strip_code_fence_bare() -> None:
+    assert _strip_code_fence('{"a": "b"}') == '{"a": "b"}'
 
 
-def test_strip_json_fence_with_json_tag() -> None:
+def test_strip_code_fence_with_json_tag() -> None:
     raw = '```json\n{"a": "b"}\n```'
-    assert _strip_json_fence(raw) == '{"a": "b"}'
+    assert _strip_code_fence(raw) == '{"a": "b"}'
 
 
-def test_strip_json_fence_without_tag() -> None:
+def test_strip_code_fence_without_tag() -> None:
     raw = '```\n{"a": "b"}\n```'
-    assert _strip_json_fence(raw) == '{"a": "b"}'
+    assert _strip_code_fence(raw) == '{"a": "b"}'
 
 
 # ---------------------------------------------------------------------------

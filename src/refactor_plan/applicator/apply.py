@@ -21,11 +21,20 @@ def apply_plan(
     dry_run: bool = False,
 ) -> ApplyResult:
     result = ApplyResult()
+
+    # Deduplicate by source — planner can assign the same file to multiple clusters
+    seen_sources: set[str] = set()
+    file_moves: list[dict] = []
+    for move in plan.get("file_moves", []):
+        if move["source"] not in seen_sources:
+            seen_sources.add(move["source"])
+            file_moves.append(move)
+
     project = rp.Project(str(repo_root))
 
     try:
         # Phase 1: file moves
-        for move in plan.get("file_moves", []):
+        for move in file_moves:
             src_abs = Path(move["source"])
             dest_pkg_abs = Path(move["dest_package"])
 
@@ -78,8 +87,11 @@ def apply_plan(
         move_records: list[MoveRecord] = []
         for action in result.applied:
             if action.kind == MoveKind.FILE:
-                old_mod = _path_to_module(Path(action.source), repo_root)
-                new_mod = _path_to_module(Path(action.dest), repo_root)
+                src_path = Path(action.source)
+                # action.dest is the dest package dir; reconstruct the full dest file path
+                dest_file = Path(action.dest) / src_path.name
+                old_mod = _path_to_module(src_path, repo_root)
+                new_mod = _path_to_module(dest_file, repo_root)
                 if old_mod and new_mod:
                     move_records.append(MoveRecord(old_module=old_mod, new_module=new_mod, symbols=[]))
             elif action.kind == MoveKind.SYMBOL and action.symbol:
