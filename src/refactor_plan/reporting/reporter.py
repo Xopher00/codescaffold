@@ -99,13 +99,14 @@ def render_dry_run_report(plan: dict, repo_root: str) -> str:
 
     if symbol_moves:
         lines.append("## Symbol Moves\n")
-        lines.append("| Source | Destination | Symbol | Risk |")
-        lines.append("|--------|-------------|--------|------|")
+        lines.append("| Source | Destination | Symbol | Reason |")
+        lines.append("|--------|-------------|--------|--------|")
         for m in symbol_moves:
             src = m.get("source", "")
             dst = m.get("dest", "")
             sym = m.get("symbol", "")
-            lines.append(f"| `{src}` | `{dst}` | `{sym}` | HIGH |")
+            reason = m.get("rationale", "")
+            lines.append(f"| `{src}` | `{dst}` | `{sym}` | {reason} |")
         lines.append("")
 
     lines.append("## Validation Plan\n")

@@ -25,6 +25,7 @@ Pass sandbox=False to apply directly (faster, no safety net).
 
 from __future__ import annotations
 
+import ast as _ast
 import hashlib
 import json
 import os
@@ -123,6 +124,83 @@ def _format_validation(report: object) -> str:
             if cmd.stderr:
                 lines.append(cmd.stderr[:400])
     return "\n".join(lines)
+
+
+def _all_imported_modules(path: Path) -> list[str]:
+    """Return every module name imported by path (ast-level, one hop only)."""
+    try:
+        tree = _ast.parse(path.read_text(encoding="utf-8"))
+    except Exception:
+        return []
+    mods: list[str] = []
+    for node in _ast.walk(tree):
+        if isinstance(node, _ast.ImportFrom) and node.module:
+            mods.append(node.module)
+        elif isinstance(node, _ast.Import):
+            for alias in node.names:
+                mods.append(alias.name)
+    return mods
+
+
+def _check_circular_import_risks(
+    src_path: Path,
+    dest_path: Path,
+    symbol_name: str,
+    repo_root: Path,
+) -> list[str]:
+    """Return risk descriptions for circular imports; empty list means safe."""
+    from refactor_plan.applicator.symbol_moves import (
+        _collect_symbol_names,
+        _file_to_module,
+        _find_symbol_code,
+        _needed_imports,
+    )
+    import libcst as cst
+
+    risks: list[str] = []
+    try:
+        src_tree = cst.parse_module(src_path.read_text(encoding="utf-8"))
+    except Exception:
+        return risks
+
+    symbol_code = _find_symbol_code(src_tree, symbol_name)
+    if symbol_code is None:
+        return risks
+
+    dest_module = _file_to_module(dest_path, repo_root)
+    src_module = _file_to_module(src_path, repo_root)
+
+    # Case 1: symbol uses names that are defined in dest_module — moving it
+    # there would require importing from itself.
+    used_names = _collect_symbol_names(symbol_code)
+    self_imports = [
+        (mod, obj)
+        for mod, obj, _ in _needed_imports(src_tree, used_names)
+        if mod == dest_module
+    ]
+    if self_imports:
+        names = ", ".join(obj or mod for mod, obj in self_imports)
+        risks.append(
+            f"Self-import: '{symbol_name}' uses [{names}] which are defined in "
+            f"destination module '{dest_module}'."
+        )
+
+    # Case 2: dest file already imports from src_module — adding the symbol
+    # there would create a reverse dependency cycle.
+    if dest_path.exists() and src_module:
+        dest_imports = _all_imported_modules(dest_path)
+        colliding = [
+            m for m in dest_imports
+            if m == src_module or m.startswith(src_module + ".")
+        ]
+        if colliding:
+            risks.append(
+                f"Reverse dependency: destination '{dest_path.name}' already imports "
+                f"from '{src_module}' ({', '.join(colliding)}). "
+                f"Moving '{symbol_name}' there would create a cycle."
+            )
+
+    return risks
 
 
 def _file_hash(path: Path) -> str | None:
@@ -352,6 +430,11 @@ def approve_symbol_moves(moves_json: str, repo: str = "") -> str:
                 continue
         except SyntaxError as exc:
             errors.append(f"  Cannot parse {src_path}: {exc}")
+            continue
+        # Pre-flight: circular import check (hard block per spec)
+        risks = _check_circular_import_risks(src_path, dest_path, sym, root)
+        if risks:
+            errors.append(f"  Circular import risk for '{sym}':\n    " + "\n    ".join(risks))
             continue
         proposals.append(SymbolMoveProposal(source=str(src_path), dest=str(dest_path), symbol=sym, approved=True))
 

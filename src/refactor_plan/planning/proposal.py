@@ -9,6 +9,7 @@ class SymbolMoveProposal(BaseModel):
     dest: str
     symbol: str
     approved: bool = False
+    rationale: str = ""
 
 
 

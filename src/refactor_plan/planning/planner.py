@@ -66,8 +66,8 @@ def _best_dest_file(
     node_id: str,
     target_files: list[str],
     file_to_nodes: dict[str, list[str]],
-) -> str | None:
-    """Target file in the community with the most edges to node_id."""
+) -> tuple[str | None, int]:
+    """Target file in the community with the most edges to node_id; returns (file, shared_count)."""
     import networkx as nx
     assert isinstance(G, nx.Graph)
     neighbors = set(G.neighbors(node_id))
@@ -76,7 +76,16 @@ def _best_dest_file(
         count = len(neighbors & set(file_to_nodes.get(f, [])))
         if count > best_count:
             best_count, best_file = count, f
-    return best_file
+    return best_file, best_count
+
+
+def _proposal_rationale(G: object, node_id: str, shared: int, symbol_comm: int) -> str:
+    import networkx as nx
+    assert isinstance(G, nx.Graph)
+    total = G.degree(node_id)
+    if shared > 0:
+        return f"{shared} of {total} neighbors in destination module; same symbol community (comm_{symbol_comm})"
+    return f"same symbol community (comm_{symbol_comm})"
 
 
 def _symbol_move_proposals(
@@ -84,6 +93,7 @@ def _symbol_move_proposals(
     file_to_community: dict[str, int],
     community_to_files: dict[int, list[str]],
     repo_root: Path,
+    god_files: set[str] | None = None,
 ) -> list[SymbolMoveProposal]:
     """Find symbols whose graphify community differs from their file's community.
 
@@ -138,11 +148,21 @@ def _symbol_move_proposals(
             if not target_files:
                 continue
 
-            dest = _best_dest_file(view.G, nid, target_files, file_to_nodes) or target_files[0]
+            # Filter out god-node files — wrong architecturally even when graph-close
+            _god = god_files or set()
+            filtered = [f for f in target_files if f not in _god]
+            if not filtered:
+                continue  # all candidates are hub files — skip proposal
+
+            dest, shared = _best_dest_file(view.G, nid, filtered, file_to_nodes)
+            if dest is None:
+                dest = filtered[0]
+                shared = 0
+            rationale = _proposal_rationale(view.G, nid, shared, symbol_comm)
             key = (file_path, label)
             if key not in seen:
                 seen.add(key)
-                proposals.append(SymbolMoveProposal(source=file_path, dest=dest, symbol=label))
+                proposals.append(SymbolMoveProposal(source=file_path, dest=dest, symbol=label, rationale=rationale))
 
     return proposals
 
@@ -232,7 +252,12 @@ def plan(view: ClusterView, repo_root: Path, graph_json: Path) -> RefactorPlan:
     community_to_files: dict[int, list[str]] = {
         cid: [str(p) for p in ps] for cid, ps in community_resolved.items()
     }
-    symbol_moves = _symbol_move_proposals(view, file_to_community, community_to_files, repo_root)
+    god_files: set[str] = {
+        _norm_path(g.get("source_file", ""), repo_root)
+        for g in view.god_nodes
+        if g.get("source_file")
+    }
+    symbol_moves = _symbol_move_proposals(view, file_to_community, community_to_files, repo_root, god_files)
 
     return RefactorPlan(
         file_moves=[],
