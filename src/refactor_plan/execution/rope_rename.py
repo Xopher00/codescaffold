@@ -15,14 +15,22 @@ logger = logging.getLogger(__name__)
 
 
 def _make_project(repo_root: Path) -> rp.Project:
-    """Create a rope Project with the correct source_folders for this repo layout."""
-    project = rp.Project(str(repo_root))
+    """Create a rope Project with the correct source_folders for this repo layout.
+
+    Writes source_folders to .ropeproject/config.py before constructing the
+    Project so rope picks it up during __init__, not after.
+    """
     try:
         layout = detect_layout(repo_root)
         src_rel = str(layout.source_root.relative_to(repo_root))
-        project.prefs['source_folders'] = [src_rel]
+        rope_dir = repo_root / ".ropeproject"
+        rope_dir.mkdir(exist_ok=True)
+        (rope_dir / "config.py").write_text(
+            f"source_folders = ['{src_rel}']\n", encoding="utf-8"
+        )
     except Exception:
         pass
+    project = rp.Project(str(repo_root))
     project.validate()
     return project
 
