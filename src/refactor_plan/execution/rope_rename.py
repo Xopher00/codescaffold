@@ -43,6 +43,7 @@ def rename_symbol(
         )
 
     project = rp.Project(str(repo_root))
+    project.validate()
     try:
         resource = libutils.path_to_resource(project, str(file_path))
         renamer = Rename(project, resource, offset)
@@ -116,6 +117,7 @@ def rename_module(
         dest = str(module_path.parent / f"{new_name}.py")
 
     project = rp.Project(str(repo_root))
+    project.validate()
     try:
         resource = libutils.path_to_resource(project, str(resource_path))
         renamer = Rename(project, resource)
