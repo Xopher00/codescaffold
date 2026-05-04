@@ -11,7 +11,7 @@ from refactor_plan.applicator.file_moves import apply_file_move
 from refactor_plan.applicator.symbol_moves import _organize_imports
 from refactor_plan.applicator.symbol_moves import apply_symbol_move
 from refactor_plan.naming.namer import RenameEntry, RenameMap
-from refactor_plan.naming.name_apply import apply_rename_map
+from refactor_plan.naming.rename_apply import apply_rename_map
 from refactor_plan.execution.apply import apply_plan
 from refactor_plan.execution.import_rewrites import MoveRecord, rewrite_cross_cluster_imports
 from refactor_plan.execution.models import ClusterInfo, AppliedAction, ApplyResult, Escalation, MoveKind, MoveStrategy
