@@ -45,11 +45,7 @@ mcp = FastMCP(
     ),
 )
 
-# ---------------------------------------------------------------------------
-# Helpers
-# ---------------------------------------------------------------------------
-
-_OUT_DIR = ".refactor_plan"
+from refactor_plan.server_helpers import _OUT_DIR  # noqa: F401
 
 
 if __name__ == "__main__":

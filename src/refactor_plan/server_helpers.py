@@ -8,6 +8,8 @@ import hashlib
 import json
 import ast as _ast
 
+_OUT_DIR = ".refactor_plan"
+
 def _repo(repo: str) -> Path:
     """Resolve repo path from argument or CODESCAFFOLD_REPO env var."""
     path = repo or os.environ.get("CODESCAFFOLD_REPO", "")
@@ -139,10 +141,8 @@ def _check_circular_import_risks(
 ) -> list[str]:
     """Return risk descriptions for circular imports; empty list means safe."""
     from refactor_plan.applicator.symbol_moves import (
-        _collect_symbol_names,
         _file_to_module,
         _find_symbol_code,
-        _needed_imports,
     )
     import libcst as cst
 
@@ -159,20 +159,8 @@ def _check_circular_import_risks(
     dest_module = _file_to_module(dest_path, repo_root)
     src_module = _file_to_module(src_path, repo_root)
 
-    # Case 1: symbol uses names that are defined in dest_module — moving it
-    # there would require importing from itself.
-    used_names = _collect_symbol_names(symbol_code)
-    self_imports = [
-        (mod, obj)
-        for mod, obj, _ in _needed_imports(src_tree, used_names)
-        if mod == dest_module
-    ]
-    if self_imports:
-        names = ", ".join(obj or mod for mod, obj in self_imports)
-        risks.append(
-            f"Self-import: '{symbol_name}' uses [{names}] which are defined in "
-            f"destination module '{dest_module}'."
-        )
+    # Case 1 (removed): "symbol uses names defined in dest_module" is not a risk.
+    # apply_symbol_move already drops those imports — they become same-file calls.
 
     # Case 2: dest file already imports from src_module — adding the symbol
     # there would create a reverse dependency cycle.
