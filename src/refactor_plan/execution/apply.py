@@ -8,9 +8,9 @@ import rope.base.project as rp
 
 from refactor_plan.applicator.file_moves import apply_file_move
 from refactor_plan.applicator.symbol_moves import apply_symbol_move
-from refactor_plan.applicator.execution.import_rewrites import MoveRecord, rewrite_cross_cluster_imports
-from refactor_plan.applicator.execution.models import AppliedAction, ApplyResult, Escalation, MoveKind
-from refactor_plan.applicator.records.manifests import write_manifest
+from refactor_plan.execution.import_rewrites import MoveRecord, rewrite_cross_cluster_imports
+from refactor_plan.execution.models import AppliedAction, ApplyResult, Escalation, MoveKind
+from refactor_plan.records.manifests import write_manifest
 
 
 logger = logging.getLogger(__name__)

@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
-from refactor_plan.applicator.execution.models import ApplyResult, MoveKind, MoveStrategy
+from refactor_plan.execution.models import ApplyResult, MoveKind, MoveStrategy
 
 
 def _risk(kind: str, source: str, dest: str) -> str:
