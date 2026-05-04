@@ -503,6 +503,22 @@ def apply(repo: str = "", sandbox: bool = True) -> str:
             discard_worktree(root, wt_path, branch)
             return "FAILED (installability — after moves) — worktree discarded.\n" + _format_validation(v2)
 
+        # --- Phase 2b: symbol moves ---
+        from refactor_plan.applicator.symbol_moves import apply_symbol_move
+        wt_symbol_moves = [m for m in wt_plan.symbol_moves if m.approved]
+        for sm in wt_symbol_moves:
+            sym_result = apply_symbol_move(
+                Path(sm.source), Path(sm.dest), sm.symbol, wt_path
+            )
+            if isinstance(sym_result, AppliedAction):
+                result.applied.append(sym_result)
+            else:
+                result.failed.append(sym_result)
+
+        if result.failed:
+            discard_worktree(root, wt_path, branch)
+            return "FAILED (symbol moves) — worktree discarded.\n" + _summarise_result(result)
+
         # --- Phase 3: import rewrites ---
         src_root = layout.source_root if wt_plan.source_root else None
         _, skipped = _run_import_rewrites(result.applied, wt_path, src_root)
