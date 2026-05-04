@@ -4,17 +4,12 @@ import logging
 from pathlib import Path
 
 from pydantic import BaseModel
-
 from refactor_plan.interface.cluster_view import ClusterView
 from refactor_plan.layout import detect_layout, _is_test_file
+from refactor_plan.execution.models import ClusterInfo, FileMoveProposal
+
 
 logger = logging.getLogger(__name__)
-
-
-class FileMoveProposal(BaseModel):
-    source: str
-    dest: str
-    dest_package: str
 
 
 class SymbolMoveProposal(BaseModel):
@@ -22,14 +17,6 @@ class SymbolMoveProposal(BaseModel):
     dest: str
     symbol: str
     approved: bool = False
-
-
-class ClusterInfo(BaseModel):
-    community_id: int
-    source_files: list[str]
-    proposed_package: str | None = None
-    cohesion: float | None = None
-    risk_level: str | None = None  # LOW / MEDIUM / HIGH based on cohesion score
 
 
 class PendingDecision(BaseModel):

@@ -11,11 +11,11 @@ from refactor_plan.applicator.file_moves import apply_file_move
 from refactor_plan.applicator.symbol_moves import _organize_imports
 from refactor_plan.applicator.symbol_moves import apply_symbol_move
 from refactor_plan.naming.namer import RenameEntry, RenameMap
-from refactor_plan.planning.planner import ClusterInfo, RefactorPlan
+from refactor_plan.planning.planner import RefactorPlan
 from refactor_plan.naming.name_apply import apply_rename_map
 from refactor_plan.execution.apply import apply_plan
 from refactor_plan.execution.import_rewrites import MoveRecord, rewrite_cross_cluster_imports
-from refactor_plan.execution.models import AppliedAction, ApplyResult, Escalation, MoveKind, MoveStrategy
+from refactor_plan.execution.models import ClusterInfo, AppliedAction, ApplyResult, Escalation, MoveKind, MoveStrategy
 from refactor_plan.execution.rope_rename import _find_symbol_offset, rename_module, rename_symbol
 from refactor_plan.records.manifests import read_manifest, read_stray_manifest, write_manifest, write_stray_manifest
 from refactor_plan.records.rollback import rollback
