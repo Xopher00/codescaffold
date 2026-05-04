@@ -8,7 +8,7 @@
 from pathlib import Path
 import networkx as nx
 from refactor_plan.interface.cluster_view import ClusterView
-from refactor_plan.planning.planner import RefactorPlan
+from refactor_plan.planning.models import RefactorPlan
 
 def _cohesion_prose(coh: float | None, n_files: int, is_scattered: bool, n_dirs: int) -> str:
     spread = f" spread across {n_dirs} directories" if is_scattered else " in one directory"

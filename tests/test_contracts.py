@@ -15,7 +15,7 @@ from refactor_plan.contracts.import_contracts import (
 )
 from refactor_plan.interface.cluster_view import ClusterView
 from refactor_plan.layout import ProjectLayout
-from refactor_plan.planning.planner import RefactorPlan
+from refactor_plan.planning.models import RefactorPlan
 
 
 # ---------------------------------------------------------------------------
