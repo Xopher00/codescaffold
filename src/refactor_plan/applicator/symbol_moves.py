@@ -272,6 +272,15 @@ def apply_symbol_move(
             reason=f"Cannot write destination file: {exc}",
         )
 
+    # If the symbol is still referenced in the source file (called by other
+    # functions that weren't moved), add a back-import from the new location.
+    # This covers the case where a locally-defined symbol is extracted but
+    # remains used in the same file — no existing import statement to rewrite.
+    from refactor_plan.execution.import_rewrites import add_back_import
+    dest_module = _file_to_module(dest_abs, repo_root)
+    if dest_module:
+        add_back_import(src_abs, symbol_name, dest_module)
+
     # Clean up unused imports in the modified source
     _organize_imports(src_abs, repo_root, project)
 
