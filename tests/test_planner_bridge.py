@@ -16,6 +16,7 @@ from refactor_plan.layout import (
 from refactor_plan.planning.planner import plan as build_plan
 from refactor_plan.interface.cluster_view import ClusterView
 import networkx as nx
+from refactor_plan.applicator.execution.apply import _ensure_package_inits, apply_plan
 
 
 # ---------------------------------------------------------------------------
@@ -271,7 +272,6 @@ def test_plan_records_source_root(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def test_ensure_package_inits_creates_init(tmp_path: Path) -> None:
-    from refactor_plan.applicator.apply import _ensure_package_inits
 
     pkg = tmp_path / "src" / "mypkg" / "new_cluster"
     pkg.mkdir(parents=True)
@@ -283,7 +283,6 @@ def test_ensure_package_inits_creates_init(tmp_path: Path) -> None:
 
 
 def test_ensure_package_inits_does_not_overwrite(tmp_path: Path) -> None:
-    from refactor_plan.applicator.apply import _ensure_package_inits
 
     pkg = tmp_path / "src" / "mypkg" / "cluster"
     pkg.mkdir(parents=True)
@@ -297,7 +296,6 @@ def test_ensure_package_inits_does_not_overwrite(tmp_path: Path) -> None:
 
 
 def test_ensure_package_inits_creates_ancestors(tmp_path: Path) -> None:
-    from refactor_plan.applicator.apply import _ensure_package_inits
 
     # Nested: src/mypkg/outer/inner/ — outer/ needs __init__.py too
     inner = tmp_path / "src" / "mypkg" / "outer" / "inner"
@@ -315,7 +313,6 @@ def test_ensure_package_inits_creates_ancestors(tmp_path: Path) -> None:
 
 
 def test_ensure_package_inits_stops_at_boundary(tmp_path: Path) -> None:
-    from refactor_plan.applicator.apply import _ensure_package_inits
 
     pkg = tmp_path / "src" / "mypkg" / "cluster"
     pkg.mkdir(parents=True)
@@ -414,7 +411,6 @@ def test_ensure_graph_no_rebuild_when_fresh(tmp_path: Path) -> None:
 def test_apply_plan_import_rewrite_failure_in_skipped(
     messy_repo: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
-    from refactor_plan.applicator.apply import apply_plan
 
     broken = messy_repo / "src" / "messy_pkg" / "broken.py"
     broken.write_text("this is @@@@ not valid python\n")

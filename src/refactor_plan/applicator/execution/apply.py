@@ -6,13 +6,14 @@ from typing import Literal
 
 import rope.base.project as rp
 
-logger = logging.getLogger(__name__)
+from refactor_plan.applicator.file_moves import apply_file_move
+from refactor_plan.applicator.symbol_moves import apply_symbol_move
+from refactor_plan.applicator.execution.import_rewrites import MoveRecord, rewrite_cross_cluster_imports
+from refactor_plan.applicator.execution.models import AppliedAction, ApplyResult, Escalation, MoveKind
+from refactor_plan.applicator.records.manifests import write_manifest
 
-from .file_moves import apply_file_move
-from .import_rewrites import MoveRecord, rewrite_cross_cluster_imports
-from .manifests import write_manifest
-from .models import AppliedAction, ApplyResult, Escalation, MoveKind
-from .symbol_moves import apply_symbol_move
+
+logger = logging.getLogger(__name__)
 
 
 def _ensure_package_inits(dest_dirs: set[Path], boundary: Path) -> list[Path]:
