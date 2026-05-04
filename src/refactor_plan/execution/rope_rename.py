@@ -9,6 +9,7 @@ from rope.base import libutils
 from rope.base.exceptions import RefactoringError
 from rope.refactor.rename import Rename
 from refactor_plan.execution.result import AppliedAction, Escalation, MoveKind, MoveStrategy
+from refactor_plan.execution.import_rewrites import MoveRecord, rewrite_cross_cluster_imports
 from refactor_plan.layout import detect_layout
 
 logger = logging.getLogger(__name__)
@@ -137,25 +138,18 @@ def rename_module(
         kind = MoveKind.FILE
         dest = str(module_path.parent / f"{new_name}.py")
 
+    old_module = _to_module_name(resource_path, repo_root)
+
     project = _make_project(repo_root)
     try:
         resource = libutils.path_to_resource(project, str(resource_path))
         renamer = Rename(project, resource)
         changes = renamer.get_changes(new_name)
-        files_touched = [c.resource.path for c in changes.changes]
 
         if not dry_run:
             project.do(changes)
-
-        return AppliedAction(
-            kind=kind,
-            source=str(module_path),
-            dest=dest,
-            strategy=MoveStrategy.ROPE,
-            files_touched=files_touched,
-            imports_rewritten=max(0, len(files_touched) - 1),
-        )
     except RefactoringError as exc:
+        project.close()
         return Escalation(
             kind=kind,
             source=str(module_path),
@@ -164,6 +158,7 @@ def rename_module(
             strategy_attempted=MoveStrategy.ROPE,
         )
     except Exception as exc:
+        project.close()
         return Escalation(
             kind=kind,
             source=str(module_path),
@@ -173,6 +168,49 @@ def rename_module(
         )
     finally:
         project.close()
+
+    # Rope reliably renames the file but does not find import sites in
+    # src-layout repos. Use LibCST to rewrite all cross-repo imports.
+    new_module = _to_module_name(Path(dest) if kind == MoveKind.FILE else Path(dest) / "__init__.py", repo_root)
+    imports_rewritten = 0
+    if not dry_run and old_module and new_module:
+        record = MoveRecord(old_module=old_module, new_module=new_module, symbols=[])
+        for py_file in repo_root.rglob("*.py"):
+            try:
+                if rewrite_cross_cluster_imports(py_file, [record]):
+                    imports_rewritten += 1
+            except Exception as exc:
+                logger.warning("import rewrite failed for %s: %s", py_file, exc)
+
+    return AppliedAction(
+        kind=kind,
+        source=str(module_path),
+        dest=dest,
+        strategy=MoveStrategy.ROPE,
+        files_touched=[str(module_path), dest],
+        imports_rewritten=imports_rewritten,
+    )
+
+
+def _to_module_name(path: Path, repo_root: Path) -> str | None:
+    """Convert a .py file path to its dotted module name, honouring the detected source root."""
+    try:
+        layout = detect_layout(repo_root)
+        src_root = layout.source_root
+    except Exception:
+        src_root = repo_root
+    try:
+        parts = list(path.relative_to(src_root).parts)
+    except ValueError:
+        try:
+            parts = list(path.relative_to(repo_root).parts)
+        except ValueError:
+            return None
+    if parts and parts[-1].endswith(".py"):
+        parts[-1] = parts[-1][:-3]
+        if parts[-1] == "__init__":
+            parts = parts[:-1]
+    return ".".join(parts) if parts else None
 
 
 def _find_symbol_offset(source: str, symbol_name: str) -> int | None:
