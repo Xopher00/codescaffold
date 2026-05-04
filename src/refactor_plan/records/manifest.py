@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from refactor_plan.execution.result import ApplyResult
+from refactor_plan.execution import ApplyResult
 
 _INIT_MANIFEST = "refactor_manifest.json"
 _STRAY_MANIFEST = "stray_deleted_manifest.json"

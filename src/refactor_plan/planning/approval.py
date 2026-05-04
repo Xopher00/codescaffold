@@ -2,12 +2,11 @@
 
 import json
 from pathlib import Path
-
-from refactor_plan.execution.result import FileMoveProposal
-from refactor_plan.layout import detect_layout
-from refactor_plan.planning.planner import write_plan
-from refactor_plan.planning.proposal import SymbolMoveProposal
+from .proposal import SymbolMoveProposal
 from refactor_plan.server_helpers import _check_circular_import_risks, _load_plan, _plan_path, _repo
+from refactor_plan.execution import FileMoveProposal
+from .planner import write_plan
+from refactor_plan import detect_layout
 
 
 def approve_moves(moves_json: str, repo: str = "") -> str:

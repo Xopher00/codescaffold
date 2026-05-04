@@ -5,11 +5,11 @@ from pathlib import Path
 from typing import Literal
 
 import rope.base.project as rp
-from refactor_plan.applicator.symbol_moves import apply_symbol_move
-from refactor_plan.execution.import_rewrites import MoveRecord, add_back_import, rewrite_cross_cluster_imports
-from refactor_plan.execution.result import AppliedAction, ApplyResult, Escalation, MoveKind
-from refactor_plan.records.manifest import write_manifest
-from refactor_plan.execution.file_phase import _path_to_module, _run_file_moves
+from .file_phase import _path_to_module, _run_file_moves
+from .import_rewrites import MoveRecord, add_back_import, rewrite_cross_cluster_imports
+from .result import AppliedAction, ApplyResult, Escalation, MoveKind
+from refactor_plan.applicator import apply_symbol_move
+from refactor_plan.records import write_manifest
 
 
 logger = logging.getLogger(__name__)

@@ -12,7 +12,7 @@ from graphify.build import build_from_json
 from graphify.cluster import cluster
 from graphify.export import to_json
 from refactor_plan.layout import detect_layout
-from refactor_plan.execution.result import FileRef
+from refactor_plan.execution import FileRef
 
 logger = logging.getLogger(__name__)
 

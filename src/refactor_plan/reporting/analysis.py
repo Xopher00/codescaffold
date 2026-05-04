@@ -9,9 +9,9 @@ from refactor_plan.layout import detect_layout
 from refactor_plan.naming.docstringer import insert_docstring_text
 from refactor_plan.planning.planner import plan as build_plan, write_plan
 from refactor_plan.records.rollback import rollback as do_rollback
-from refactor_plan.reporting.reporter import render_dry_run_report, write_report
+from .reporter import render_dry_run_report, write_report
 from refactor_plan.server_helpers import _load_plan, _out_dir, _plan_path, _repo, _reset_stale_artifacts
-from refactor_plan.validation.validator import validate as do_validate
+from refactor_plan.validation import validate as do_validate
 
 
 def analyze(repo: str = "") -> str:

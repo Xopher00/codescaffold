@@ -8,7 +8,7 @@ import libcst as cst
 import rope.base.project as rp
 from libcst.codemod import CodemodContext
 from libcst.codemod.visitors import AddImportsVisitor
-from refactor_plan.execution.result import AppliedAction, Escalation, MoveKind, MoveStrategy
+from refactor_plan.execution import add_back_import, AppliedAction, Escalation, MoveKind, MoveStrategy
 
 logger = logging.getLogger(__name__)
 
@@ -144,6 +144,9 @@ def _remove_symbol(tree: cst.Module, symbol_name: str) -> cst.Module:
     return tree.visit(remover)
 
 
+from .package_api import update_package_init, rewrite_symbol_callers
+
+
 def _organize_imports(file_path: Path, repo_root: Path, project: rp.Project | None = None) -> None:
     try:
         from rope.refactor.importutils import ImportOrganizer
@@ -276,15 +279,30 @@ def apply_symbol_move(
     # post-removal state and correctly strips imports the symbol took with it.
     _organize_imports(src_abs, repo_root, project)
 
-    # After organizing, add a back-import if the symbol is still referenced in
-    # the source (called by functions that weren't moved). Must come after
-    # _organize_imports so rope's cached project doesn't strip it again.
-    from refactor_plan.execution.import_rewrites import add_back_import
-    dest_module = _file_to_module(dest_abs, repo_root)
-    if dest_module:
-        add_back_import(src_abs, symbol_name, dest_module)
-
     files_touched = [str(src_abs), str(dest_abs)]
+
+    # Cross-package: update destination __init__.py and rewrite all callers to
+    # use the package-level import. Same-package: add a back-import if the
+    # symbol is still referenced in the source. Both run after _organize_imports
+    # so rope's cached project doesn't strip the added import again.
+    if src_abs.parent != dest_abs.parent:
+        dest_pkg_module = _file_to_module(dest_abs.parent / "__init__.py", repo_root)
+        src_module = _file_to_module(src_abs, repo_root)
+        if dest_pkg_module and src_module:
+            update_package_init(dest_abs, symbol_name)
+            init_path = str(dest_abs.parent / "__init__.py")
+            if init_path not in files_touched:
+                files_touched.append(init_path)
+            caller_files = rewrite_symbol_callers(
+                src_abs, dest_abs, symbol_name, src_module, dest_pkg_module, repo_root
+            )
+            for f in caller_files:
+                if f not in files_touched:
+                    files_touched.append(f)
+    else:
+        dest_module = _file_to_module(dest_abs, repo_root)
+        if dest_module:
+            add_back_import(src_abs, symbol_name, dest_module)
 
     return AppliedAction(
         kind=MoveKind.SYMBOL,

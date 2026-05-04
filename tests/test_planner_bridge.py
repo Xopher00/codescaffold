@@ -5,17 +5,11 @@ import time
 from pathlib import Path
 
 import pytest
-
-from refactor_plan.interface.graph_bridge import ensure_graph
-from refactor_plan.layout import (
-    _detect_cluster_root,
-    _detect_source_root,
-    _is_test_file,
-    detect_layout,
-)
-from refactor_plan.planning.planner import plan as build_plan
-from refactor_plan.interface.cluster_view import ClusterView
 import networkx as nx
+from refactor_plan.interface import ensure_graph, ClusterView
+from refactor_plan.planning import plan as build_plan
+from refactor_plan.validation import validate
+from refactor_plan import ProjectLayout, _detect_cluster_root, _detect_source_root, _is_test_file, detect_layout
 from refactor_plan.execution.apply import _ensure_package_inits, apply_plan
 
 
@@ -329,7 +323,6 @@ def test_ensure_package_inits_stops_at_boundary(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def test_validate_structural_only_runs_compileall(tmp_path: Path) -> None:
-    from refactor_plan.validation.validator import validate
 
     report = validate(tmp_path, mode="structural")
     commands = [r.command for r in report.commands]
@@ -338,8 +331,6 @@ def test_validate_structural_only_runs_compileall(tmp_path: Path) -> None:
 
 
 def test_validate_behavioral_skipped_when_no_tests(tmp_path: Path) -> None:
-    from refactor_plan.layout import ProjectLayout
-    from refactor_plan.validation.validator import validate
 
     layout = ProjectLayout(
         source_root=tmp_path,
@@ -354,7 +345,6 @@ def test_validate_behavioral_skipped_when_no_tests(tmp_path: Path) -> None:
 
 
 def test_validate_explicit_commands_override_mode(tmp_path: Path) -> None:
-    from refactor_plan.validation.validator import validate
 
     report = validate(tmp_path, commands=["true"], mode="structural")
     assert len(report.commands) == 1
@@ -434,7 +424,6 @@ def test_apply_plan_import_rewrite_failure_in_skipped(
 # ---------------------------------------------------------------------------
 
 def test_detect_layout_reads_pytest_ini(tmp_path: Path) -> None:
-    from refactor_plan.layout import detect_layout
 
     (tmp_path / "pytest.ini").write_text("[pytest]\ntestpaths = mytests\n")
     mytests = tmp_path / "mytests"
@@ -447,7 +436,6 @@ def test_detect_layout_reads_pytest_ini(tmp_path: Path) -> None:
 
 
 def test_detect_layout_reads_pyproject_pytest_options(tmp_path: Path) -> None:
-    from refactor_plan.layout import detect_layout
 
     (tmp_path / "pyproject.toml").write_text(
         '[tool.pytest.ini_options]\ntestpaths = ["custom_tests"]\n'
@@ -462,7 +450,6 @@ def test_detect_layout_reads_pyproject_pytest_options(tmp_path: Path) -> None:
 
 
 def test_detect_layout_fallback_tests_dir(tmp_path: Path) -> None:
-    from refactor_plan.layout import detect_layout
 
     tests = tmp_path / "tests"
     tests.mkdir()
@@ -474,7 +461,6 @@ def test_detect_layout_fallback_tests_dir(tmp_path: Path) -> None:
 
 
 def test_detect_layout_no_tests(tmp_path: Path) -> None:
-    from refactor_plan.layout import detect_layout
 
     layout = detect_layout(tmp_path)
     assert layout.has_tests is False
@@ -485,8 +471,6 @@ def test_detect_layout_no_tests(tmp_path: Path) -> None:
 # ---------------------------------------------------------------------------
 
 def test_validate_structural_uses_source_root(tmp_path: Path) -> None:
-    from refactor_plan.layout import ProjectLayout
-    from refactor_plan.validation.validator import validate
 
     src = tmp_path / "src"
     src.mkdir()
@@ -505,8 +489,6 @@ def test_validate_structural_uses_source_root(tmp_path: Path) -> None:
 
 
 def test_validate_behavioral_installability_check(tmp_path: Path) -> None:
-    from refactor_plan.layout import ProjectLayout
-    from refactor_plan.validation.validator import validate
 
     src = tmp_path / "src"
     src.mkdir()

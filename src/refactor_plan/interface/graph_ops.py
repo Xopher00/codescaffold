@@ -3,8 +3,8 @@
 import subprocess
 
 from refactor_plan.contracts.import_contracts import check_staleness, generate_contracts as do_generate_contracts
-from refactor_plan.interface.cluster_view import build_view
-from refactor_plan.interface.graph_bridge import ensure_graph
+from .cluster_view import build_view
+from .graph_bridge import ensure_graph
 from refactor_plan.layout import detect_layout
 from refactor_plan.naming.docstringer import build_docstring_context
 from refactor_plan.naming.namer import build_naming_context

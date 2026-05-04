@@ -2,10 +2,9 @@ import hashlib
 import json
 import os
 from pathlib import Path
-
-from refactor_plan.execution.result import ApplyResult
-from refactor_plan.planning.proposal import RefactorPlan
-from refactor_plan.applicator.cleanup import _all_imported_modules
+from .execution import ApplyResult
+from .planning import RefactorPlan
+from .applicator import _all_imported_modules, _file_to_module, _find_symbol_code, _remove_symbol
 
 
 _OUT_DIR = ".refactor_plan"
@@ -123,10 +122,6 @@ def _check_circular_import_risks(
     repo_root: Path,
 ) -> list[str]:
     """Return risk descriptions for circular imports; empty list means safe."""
-    from refactor_plan.applicator.symbol_moves import (
-        _file_to_module,
-        _find_symbol_code,
-    )
     import libcst as cst
 
     risks: list[str] = []
@@ -161,7 +156,6 @@ def _check_circular_import_risks(
             # Simulate exactly what add_back_import checks.
             try:
                 import libcst as cst
-                from refactor_plan.applicator.symbol_moves import _remove_symbol
                 src_text = src_path.read_text(encoding="utf-8")
                 src_tree = cst.parse_module(src_text)
                 modified = _remove_symbol(src_tree, symbol_name).code

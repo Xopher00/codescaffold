@@ -6,19 +6,12 @@ from pathlib import Path
 
 import pytest
 import rope.base.project as rp
-from refactor_plan.applicator.cleanup import ensure_future_annotations, find_stray_inits, is_residue
-from refactor_plan.applicator.file_moves import apply_file_move
-from refactor_plan.applicator.symbol_moves import _organize_imports
-from refactor_plan.applicator.symbol_moves import apply_symbol_move
-from refactor_plan.naming.namer import RenameEntry, RenameMap
-from refactor_plan.naming.rename_apply import apply_rename_map
+from refactor_plan.execution import _find_symbol_offset, rename_module, rename_symbol, MoveRecord, rewrite_cross_cluster_imports, AppliedAction, ApplyResult, ClusterInfo, Escalation, MoveKind, MoveStrategy
 from refactor_plan.execution.apply import apply_plan
-from refactor_plan.execution.import_rewrites import MoveRecord, rewrite_cross_cluster_imports
-from refactor_plan.execution.result import ClusterInfo, AppliedAction, ApplyResult, Escalation, MoveKind, MoveStrategy
-from refactor_plan.execution.rope_rename import _find_symbol_offset, rename_module, rename_symbol
-from refactor_plan.records.rollback import rollback
-from refactor_plan.planning.proposal import RefactorPlan
-from refactor_plan.records.manifest import read_manifest, read_stray_manifest, write_manifest, write_stray_manifest
+from refactor_plan.planning import RefactorPlan
+from refactor_plan.applicator import ensure_future_annotations, find_stray_inits, is_residue, apply_file_move, _organize_imports, apply_symbol_move
+from refactor_plan.records import rollback, read_manifest, read_stray_manifest, write_manifest, write_stray_manifest
+from refactor_plan.naming import apply_rename_map, RenameEntry, RenameMap
 
 
 # ---------------------------------------------------------------------------
@@ -223,6 +216,75 @@ def test_symbol_move_stores_snapshot(messy_repo: Path) -> None:
     assert isinstance(action, AppliedAction)
     assert action.original_content is not None
     assert action.original_content[str(src)] == original
+
+
+# ---------------------------------------------------------------------------
+# cross-package symbol moves — __init__.py and caller rewrite
+# ---------------------------------------------------------------------------
+
+def test_cross_package_move_updates_init(tmp_path: Path) -> None:
+    pkg_a = tmp_path / "src" / "pkg_a"
+    pkg_a.mkdir(parents=True)
+    (pkg_a / "__init__.py").write_text("")
+    (pkg_a / "mod.py").write_text("def helper():\n    return 1\n")
+
+    pkg_b = tmp_path / "src" / "pkg_b"
+    pkg_b.mkdir(parents=True)
+    (pkg_b / "__init__.py").write_text("")
+    (pkg_b / "dest.py").write_text("")
+
+    action = apply_symbol_move(pkg_a / "mod.py", pkg_b / "dest.py", "helper", tmp_path)
+
+    assert isinstance(action, AppliedAction)
+    init_text = (pkg_b / "__init__.py").read_text()
+    assert "from .dest import helper" in init_text
+
+
+def test_cross_package_move_rewrites_external_callers(tmp_path: Path) -> None:
+    pkg_a = tmp_path / "src" / "pkg_a"
+    pkg_a.mkdir(parents=True)
+    (pkg_a / "__init__.py").write_text("")
+    (pkg_a / "mod.py").write_text("def helper():\n    return 1\n")
+
+    pkg_b = tmp_path / "src" / "pkg_b"
+    pkg_b.mkdir(parents=True)
+    (pkg_b / "__init__.py").write_text("")
+    (pkg_b / "dest.py").write_text("")
+
+    # caller in a third package
+    pkg_c = tmp_path / "src" / "pkg_c"
+    pkg_c.mkdir(parents=True)
+    (pkg_c / "__init__.py").write_text("")
+    caller = pkg_c / "caller.py"
+    caller.write_text("from pkg_a.mod import helper\n\ndef run():\n    return helper()\n")
+
+    apply_symbol_move(pkg_a / "mod.py", pkg_b / "dest.py", "helper", tmp_path)
+
+    caller_text = caller.read_text()
+    assert "from pkg_b import helper" in caller_text
+    assert "from pkg_a.mod import helper" not in caller_text
+
+
+def test_cross_package_move_src_back_import_is_package_level(tmp_path: Path) -> None:
+    pkg_a = tmp_path / "src" / "pkg_a"
+    pkg_a.mkdir(parents=True)
+    (pkg_a / "__init__.py").write_text("")
+    # mod.py defines helper but also calls it
+    (pkg_a / "mod.py").write_text(
+        "def helper():\n    return 1\n\n\ndef wrapper():\n    return helper()\n"
+    )
+
+    pkg_b = tmp_path / "src" / "pkg_b"
+    pkg_b.mkdir(parents=True)
+    (pkg_b / "__init__.py").write_text("")
+    (pkg_b / "dest.py").write_text("")
+
+    apply_symbol_move(pkg_a / "mod.py", pkg_b / "dest.py", "helper", tmp_path)
+
+    src_text = (pkg_a / "mod.py").read_text()
+    # Back-import must be package-level, not module-level
+    assert "from pkg_b import helper" in src_text
+    assert "from pkg_b.dest import helper" not in src_text
 
 
 # ---------------------------------------------------------------------------

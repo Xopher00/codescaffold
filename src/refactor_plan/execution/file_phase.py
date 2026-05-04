@@ -1,9 +1,9 @@
 
 
 from pathlib import Path
-from refactor_plan.execution.result import Escalation, AppliedAction, MoveKind
 import rope.base.project as rp
-from refactor_plan.applicator.file_moves import apply_file_move
+from .result import AppliedAction, Escalation, MoveKind
+from refactor_plan.applicator import normalize_package_imports, apply_file_move
 
 def _path_to_module(
     path: Path,
@@ -103,5 +103,9 @@ def _run_file_moves(
         else:
             applied.append(action)
             dest_dirs.add(dest_pkg_abs)
+
+    if applied:
+        repo_root = Path(project.root.real_path)
+        normalize_package_imports(repo_root)
 
     return applied, failed, dest_dirs

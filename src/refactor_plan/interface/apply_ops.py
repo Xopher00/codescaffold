@@ -3,29 +3,24 @@
 from pathlib import Path
 import json
 import subprocess
-
-from refactor_plan.contracts.import_contracts import generate_contracts as do_generate_contracts
-from refactor_plan.execution.apply import _ensure_package_inits, _run_import_rewrites, apply_plan as do_apply_plan
-from refactor_plan.execution.file_phase import _cleanup_empty_source_dirs, _run_file_moves
-from refactor_plan.execution.result import Escalation, AppliedAction, ApplyResult
-from refactor_plan.execution.rope_rename import rename_module as do_rename_module, rename_symbol as do_rename_symbol
-from refactor_plan.interface.cluster_view import build_view
-from refactor_plan.interface.graph_bridge import ensure_graph
-from refactor_plan.interface.worktree import (
+from .worktree import (
     commit_and_release, create_worktree, create_worktree_from_branch,
     discard_worktree, load_state, save_state, translate_plan,
 )
-from refactor_plan.layout import detect_layout
-from refactor_plan.naming.namer import RenameEntry, RenameMap
-from refactor_plan.naming.rename_apply import apply_rename_map as do_apply_rename_map
-from refactor_plan.planning.planner import write_plan
-from refactor_plan.planning.proposal import RefactorPlan
-from refactor_plan.records.manifest import write_manifest
 from refactor_plan.server_helpers import (
     _build_trace, _cluster_for_file, _format_validation, _load_plan,
     _out_dir, _repo, _reset_stale_artifacts, _sandbox_result, _summarise_result,
 )
-from refactor_plan.validation.validator import validate as do_validate
+from refactor_plan.execution import rename_module as do_rename_module, rename_symbol as do_rename_symbol, AppliedAction, ApplyResult, Escalation
+from refactor_plan.execution.apply import _ensure_package_inits, _run_import_rewrites, apply_plan as do_apply_plan
+from refactor_plan.execution.file_phase import _cleanup_empty_source_dirs, _run_file_moves
+from refactor_plan.planning import write_plan, RefactorPlan
+from refactor_plan.applicator import apply_symbol_move
+from refactor_plan.records import write_manifest
+from refactor_plan.contracts import generate_contracts as do_generate_contracts
+from refactor_plan.naming import apply_rename_map as do_apply_rename_map, RenameEntry, RenameMap
+from refactor_plan.validation import validate as do_validate
+from refactor_plan import detect_layout
 
 
 def apply(repo: str = "", sandbox: bool = True) -> str:
@@ -115,9 +110,6 @@ def apply(repo: str = "", sandbox: bool = True) -> str:
         if not v2.passed:
             discard_worktree(root, wt_path, branch)
             return "FAILED (installability — after moves) — worktree discarded.\n" + _format_validation(v2)
-
-        # --- Phase 2b: symbol moves ---
-        from refactor_plan.applicator.symbol_moves import apply_symbol_move
         wt_symbol_moves = [m for m in wt_plan.symbol_moves if m.approved]
         for sm in wt_symbol_moves:
             sym_result = apply_symbol_move(

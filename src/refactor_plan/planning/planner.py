@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
+from typing import TYPE_CHECKING
 
-from refactor_plan.execution.result import ClusterInfo
-from refactor_plan.interface.cluster_view import ClusterView
-from refactor_plan.layout import detect_layout, _is_test_file
-from refactor_plan.planning.proposal import RefactorPlan, PendingDecision, SymbolMoveProposal
+from .proposal import PendingDecision, SymbolMoveProposal, RefactorPlan
+from refactor_plan.execution import ClusterInfo
+from refactor_plan import _is_test_file, detect_layout
+
+if TYPE_CHECKING:
+    from refactor_plan.interface.cluster_view import ClusterView
 
 
 logger = logging.getLogger(__name__)
