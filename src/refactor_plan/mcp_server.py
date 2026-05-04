@@ -51,8 +51,8 @@ from refactor_plan.reporting.reporter import render_dry_run_report, write_report
 from refactor_plan.validation.validator import validate as do_validate
 from refactor_plan.reporting.cluster_context import _format_pending_decisions
 from refactor_plan.planning.proposal import RefactorPlan, SymbolMoveProposal
-from refactor_plan.execution.phases import _cleanup_empty_source_dirs, _run_file_moves
 from refactor_plan.records.manifest import write_manifest
+from refactor_plan.execution.file_phase import _cleanup_empty_source_dirs, _run_file_moves
 
 
 mcp = FastMCP(
