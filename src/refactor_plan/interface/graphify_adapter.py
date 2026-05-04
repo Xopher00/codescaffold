@@ -44,6 +44,7 @@ class MoveCandidate:
 
 
 _PATH_KEYS = (
+    "source_file",  # graphify's actual field name
     "path",
     "file",
     "filepath",
