@@ -264,12 +264,13 @@ def approve_moves(moves_json: str, repo: str = "") -> str:
 
 @mcp.tool()
 def approve_symbol_moves(moves_json: str, repo: str = "") -> str:
-    """Mark symbol moves from the plan as approved for the next apply.
+    """Mark symbol moves as approved for the next apply.
 
     moves_json — JSON array of move objects:
       [{"source": "src/pkg/foo.py", "dest": "src/other/bar.py", "symbol": "MyClass"}, ...]
 
-    Only symbols already present in the plan's symbol_moves list can be approved.
+    Accepts any valid source/dest/symbol triple — not limited to planner proposals.
+    Validates that the source file exists and contains the named symbol.
     Pass [] to clear all approved symbol moves.
     Call apply next to execute approved moves in a sandbox.
     """
@@ -287,37 +288,49 @@ def approve_symbol_moves(moves_json: str, repo: str = "") -> str:
         write_plan(plan, _plan_path(root))
         return "Symbol move approvals cleared."
 
-    approved_keys: set[tuple[str, str, str]] = set()
+    from refactor_plan.planning.planner import SymbolMoveProposal
+    import ast
+
+    proposals: list[SymbolMoveProposal] = []
+    errors: list[str] = []
+
     for entry in raw_moves:
         src = entry.get("source", "")
         dest = entry.get("dest", "")
         sym = entry.get("symbol", "")
         if not src or not dest or not sym:
-            return f"Missing source, dest, or symbol in: {entry}"
-        src_abs = str(Path(src).resolve() if not Path(src).is_absolute() else Path(src))
-        dest_abs = str(Path(dest).resolve() if not Path(dest).is_absolute() else Path(dest))
-        approved_keys.add((src_abs, dest_abs, sym))
+            errors.append(f"  Missing source, dest, or symbol in: {entry}")
+            continue
+        src_path = (root / src).resolve() if not Path(src).is_absolute() else Path(src).resolve()
+        dest_path = (root / dest).resolve() if not Path(dest).is_absolute() else Path(dest).resolve()
+        if not src_path.exists():
+            errors.append(f"  Source not found: {src}")
+            continue
+        # Verify symbol exists in source file
+        try:
+            tree = ast.parse(src_path.read_text(encoding="utf-8"))
+            names = {n.name for n in ast.walk(tree) if isinstance(n, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef))}
+            if sym not in names:
+                errors.append(f"  Symbol '{sym}' not found in {src_path}")
+                continue
+        except SyntaxError as exc:
+            errors.append(f"  Cannot parse {src_path}: {exc}")
+            continue
+        proposals.append(SymbolMoveProposal(source=str(src_path), dest=str(dest_path), symbol=sym, approved=True))
 
-    matched = 0
-    unmatched: list[str] = []
-    for m in plan.symbol_moves:
-        key = (str(Path(m.source).resolve()), str(Path(m.dest).resolve()), m.symbol)
-        if key in approved_keys:
-            m.approved = True
-            matched += 1
-        approved_keys.discard(key)
+    if errors:
+        return "Validation errors — no moves written:\n" + "\n".join(errors)
 
-    for src_abs, dest_abs, sym in approved_keys:
-        unmatched.append(f"  {sym} ({src_abs} → {dest_abs})")
-
+    # Merge with existing unapproved planner proposals (keep them for reference)
+    approved_keys = {(m.source, m.dest, m.symbol) for m in proposals}
+    retained = [m for m in plan.symbol_moves if (m.source, m.dest, m.symbol) not in approved_keys]
+    plan.symbol_moves = retained + proposals
     write_plan(plan, _plan_path(root))
 
-    lines = [f"{matched} symbol move(s) approved."]
-    if unmatched:
-        lines.append("Not found in plan (run analyze first):")
-        lines.extend(unmatched)
-    lines.append("Call apply next to execute in a sandbox.")
-    return "\n".join(lines)
+    return (
+        f"{len(proposals)} symbol move(s) approved.\n"
+        "Call apply next to execute in a sandbox."
+    )
 
 
 @mcp.tool()
