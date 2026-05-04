@@ -451,8 +451,16 @@ def apply(repo: str = "", sandbox: bool = True) -> str:
 
         commit_and_release(root, wt_path, "refactor: apply file moves")
 
-        # Record that the rename phase must run before this branch is merged.
-        save_state(_out_dir(root), pending_rename_branch=branch)
+        # Only gate on rename if moves used pkg_NNN placeholder directories.
+        # When destinations are already semantic names, the branch is final.
+        import re as _re
+        _placeholder_pattern = _re.compile(r"(^|[\\/])pkg_\d+($|[\\/])")
+        _needs_rename = any(
+            _placeholder_pattern.search(m.dest_package)
+            for m in wt_plan.file_moves
+        )
+        if _needs_rename:
+            save_state(_out_dir(root), pending_rename_branch=branch)
 
         # Refresh contracts to reflect the new module layout
         try:
@@ -462,11 +470,19 @@ def apply(repo: str = "", sandbox: bool = True) -> str:
         except Exception:
             pass
 
+        if _needs_rename:
+            return (
+                f"{_summarise_result(result)}\n\n"
+                f"Structural moves committed to branch '{branch}'.\n"
+                f"DO NOT MERGE YET — placeholder names are not final.\n"
+                f"Next: get_cluster_context → apply_rename_map\n"
+                f"Discard: git branch -D {branch}"
+            )
         return (
             f"{_summarise_result(result)}\n\n"
-            f"Structural moves committed to branch '{branch}'.\n"
-            f"DO NOT MERGE YET — placeholder names are not final.\n"
-            f"Next: get_cluster_context → apply_rename_map\n"
+            f"Validation PASSED. Changes committed to branch '{branch}'.\n"
+            f"Review : git diff HEAD...{branch}\n"
+            f"Apply  : git merge {branch}\n"
             f"Discard: git branch -D {branch}"
         )
 
