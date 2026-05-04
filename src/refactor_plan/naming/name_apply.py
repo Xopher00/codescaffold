@@ -12,9 +12,9 @@ from rope.refactor.rename import Rename
 from refactor_plan.naming.namer import RenameMap
 from refactor_plan.planning.planner import RefactorPlan
 
-from .import_rewrites import MoveRecord, rewrite_cross_cluster_imports
-from .manifests import write_manifest
-from .models import AppliedAction, ApplyResult, Escalation, MoveKind, MoveStrategy
+from refactor_plan.applicator.import_rewrites import MoveRecord, rewrite_cross_cluster_imports
+from refactor_plan.applicator.manifests import write_manifest
+from refactor_plan.applicator.models import AppliedAction, ApplyResult, Escalation, MoveKind, MoveStrategy
 
 logger = logging.getLogger(__name__)
 

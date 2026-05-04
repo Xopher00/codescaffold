@@ -13,13 +13,13 @@ from refactor_plan.applicator.file_moves import apply_file_move
 from refactor_plan.applicator.import_rewrites import MoveRecord, rewrite_cross_cluster_imports
 from refactor_plan.applicator.manifests import read_manifest, read_stray_manifest, write_manifest, write_stray_manifest
 from refactor_plan.applicator.models import AppliedAction, ApplyResult, Escalation, MoveKind, MoveStrategy
-from refactor_plan.applicator.name_apply import apply_rename_map
 from refactor_plan.applicator.rollback import rollback
 from refactor_plan.applicator.rope_rename import _find_symbol_offset, rename_module, rename_symbol
 from refactor_plan.applicator.symbol_moves import _organize_imports
 from refactor_plan.applicator.symbol_moves import apply_symbol_move
 from refactor_plan.naming.namer import RenameEntry, RenameMap
 from refactor_plan.planning.planner import ClusterInfo, RefactorPlan
+from refactor_plan.naming.name_apply import apply_rename_map
 
 
 # ---------------------------------------------------------------------------

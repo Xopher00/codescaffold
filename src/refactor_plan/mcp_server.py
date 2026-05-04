@@ -40,19 +40,9 @@ from refactor_plan.applicator.apply import (
 )
 from refactor_plan.applicator.models import AppliedAction, ApplyResult, Escalation
 from refactor_plan.layout import detect_layout
-from refactor_plan.applicator.name_apply import apply_rename_map as do_apply_rename_map
 from refactor_plan.applicator.rollback import rollback as do_rollback
 from refactor_plan.applicator.rope_rename import rename_module as do_rename_module
 from refactor_plan.applicator.rope_rename import rename_symbol as do_rename_symbol
-from refactor_plan.applicator.worktree import (
-    commit_and_release,
-    create_worktree,
-    create_worktree_from_branch,
-    discard_worktree,
-    load_state,
-    save_state,
-    translate_plan,
-)
 from refactor_plan.contracts.import_contracts import (
     check_staleness,
     generate_contracts as do_generate_contracts,
@@ -66,6 +56,8 @@ from refactor_plan.planning.planner import plan as build_plan
 from refactor_plan.planning.planner import write_plan
 from refactor_plan.reporting.reporter import render_dry_run_report, write_report
 from refactor_plan.validation.validator import validate as do_validate
+from refactor_plan.naming.name_apply import apply_rename_map as do_apply_rename_map
+from refactor_plan.interface.worktree import commit_and_release, create_worktree, create_worktree_from_branch, discard_worktree, load_state, save_state, translate_plan
 
 mcp = FastMCP(
     "codescaffold",
