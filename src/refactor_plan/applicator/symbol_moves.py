@@ -272,17 +272,17 @@ def apply_symbol_move(
             reason=f"Cannot write destination file: {exc}",
         )
 
-    # If the symbol is still referenced in the source file (called by other
-    # functions that weren't moved), add a back-import from the new location.
-    # This covers the case where a locally-defined symbol is extracted but
-    # remains used in the same file — no existing import statement to rewrite.
+    # Clean up unused imports in the modified source first — rope sees the
+    # post-removal state and correctly strips imports the symbol took with it.
+    _organize_imports(src_abs, repo_root, project)
+
+    # After organizing, add a back-import if the symbol is still referenced in
+    # the source (called by functions that weren't moved). Must come after
+    # _organize_imports so rope's cached project doesn't strip it again.
     from refactor_plan.execution.import_rewrites import add_back_import
     dest_module = _file_to_module(dest_abs, repo_root)
     if dest_module:
         add_back_import(src_abs, symbol_name, dest_module)
-
-    # Clean up unused imports in the modified source
-    _organize_imports(src_abs, repo_root, project)
 
     files_touched = [str(src_abs), str(dest_abs)]
 
