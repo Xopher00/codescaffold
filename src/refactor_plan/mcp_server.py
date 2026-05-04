@@ -442,7 +442,8 @@ def apply(repo: str = "", sandbox: bool = True) -> str:
             "source_root": p.source_root,
         }
 
-    if not plan.file_moves and plan.pending_decisions:
+    approved_symbol_moves = [m for m in plan.symbol_moves if m.approved]
+    if not plan.file_moves and not approved_symbol_moves and plan.pending_decisions:
         return (
             "No moves approved yet.\n"
             "Run get_cluster_context to review graph evidence, "
