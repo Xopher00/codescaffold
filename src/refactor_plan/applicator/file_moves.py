@@ -7,7 +7,7 @@ from rope.base import libutils
 from rope.base.exceptions import RefactoringError, ResourceNotFoundError
 from rope.refactor.move import MoveModule
 
-from .models import AppliedAction, Escalation, MoveKind, MoveStrategy
+from refactor_plan.applicator.execution.models import AppliedAction, Escalation, MoveKind, MoveStrategy
 
 
 def apply_file_move(

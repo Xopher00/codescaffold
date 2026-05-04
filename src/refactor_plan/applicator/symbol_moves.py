@@ -6,7 +6,7 @@ from pathlib import Path
 import libcst as cst
 import rope.base.project as rp
 
-from .models import AppliedAction, Escalation, MoveKind, MoveStrategy
+from refactor_plan.applicator.execution.models import AppliedAction, Escalation, MoveKind, MoveStrategy
 
 logger = logging.getLogger(__name__)
 

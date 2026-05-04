@@ -31,18 +31,7 @@ import subprocess
 from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP
-
-from refactor_plan.applicator.apply import (
-    apply_plan as do_apply_plan,
-    _ensure_package_inits,
-    _run_file_moves,
-    _run_import_rewrites,
-)
-from refactor_plan.applicator.models import AppliedAction, ApplyResult, Escalation
 from refactor_plan.layout import detect_layout
-from refactor_plan.applicator.rollback import rollback as do_rollback
-from refactor_plan.applicator.rope_rename import rename_module as do_rename_module
-from refactor_plan.applicator.rope_rename import rename_symbol as do_rename_symbol
 from refactor_plan.contracts.import_contracts import (
     check_staleness,
     generate_contracts as do_generate_contracts,
@@ -58,6 +47,11 @@ from refactor_plan.reporting.reporter import render_dry_run_report, write_report
 from refactor_plan.validation.validator import validate as do_validate
 from refactor_plan.naming.name_apply import apply_rename_map as do_apply_rename_map
 from refactor_plan.interface.worktree import commit_and_release, create_worktree, create_worktree_from_branch, discard_worktree, load_state, save_state, translate_plan
+from refactor_plan.applicator.execution.apply import _ensure_package_inits, _run_file_moves, _run_import_rewrites, apply_plan as do_apply_plan
+from refactor_plan.applicator.execution.rope_rename import rename_module as do_rename_module, rename_symbol as do_rename_symbol
+from refactor_plan.applicator.records.rollback import rollback as do_rollback
+from refactor_plan.applicator.execution.models import AppliedAction, ApplyResult, Escalation
+from refactor_plan.applicator.records.manifests import write_manifest
 
 mcp = FastMCP(
     "codescaffold",
@@ -453,7 +447,6 @@ def apply(repo: str = "", sandbox: bool = True) -> str:
             return "FAILED (behavioral/pytest) — worktree discarded.\n" + _format_validation(v4)
 
         wt_out.mkdir(parents=True, exist_ok=True)
-        from refactor_plan.applicator.manifests import write_manifest
         write_manifest(result, wt_out)
 
         commit_and_release(root, wt_path, "refactor: apply file moves")
