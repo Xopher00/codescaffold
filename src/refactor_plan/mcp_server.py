@@ -263,6 +263,64 @@ def approve_moves(moves_json: str, repo: str = "") -> str:
 
 
 @mcp.tool()
+def approve_symbol_moves(moves_json: str, repo: str = "") -> str:
+    """Mark symbol moves from the plan as approved for the next apply.
+
+    moves_json — JSON array of move objects:
+      [{"source": "src/pkg/foo.py", "dest": "src/other/bar.py", "symbol": "MyClass"}, ...]
+
+    Only symbols already present in the plan's symbol_moves list can be approved.
+    Pass [] to clear all approved symbol moves.
+    Call apply next to execute approved moves in a sandbox.
+    """
+    root = _repo(repo)
+    try:
+        raw_moves: list[dict] = json.loads(moves_json)
+    except json.JSONDecodeError as exc:
+        return f"Invalid JSON: {exc}"
+
+    plan = _load_plan(root)
+
+    if not raw_moves:
+        for m in plan.symbol_moves:
+            m.approved = False
+        write_plan(plan, _plan_path(root))
+        return "Symbol move approvals cleared."
+
+    approved_keys: set[tuple[str, str, str]] = set()
+    for entry in raw_moves:
+        src = entry.get("source", "")
+        dest = entry.get("dest", "")
+        sym = entry.get("symbol", "")
+        if not src or not dest or not sym:
+            return f"Missing source, dest, or symbol in: {entry}"
+        src_abs = str(Path(src).resolve() if not Path(src).is_absolute() else Path(src))
+        dest_abs = str(Path(dest).resolve() if not Path(dest).is_absolute() else Path(dest))
+        approved_keys.add((src_abs, dest_abs, sym))
+
+    matched = 0
+    unmatched: list[str] = []
+    for m in plan.symbol_moves:
+        key = (str(Path(m.source).resolve()), str(Path(m.dest).resolve()), m.symbol)
+        if key in approved_keys:
+            m.approved = True
+            matched += 1
+        approved_keys.discard(key)
+
+    for src_abs, dest_abs, sym in approved_keys:
+        unmatched.append(f"  {sym} ({src_abs} → {dest_abs})")
+
+    write_plan(plan, _plan_path(root))
+
+    lines = [f"{matched} symbol move(s) approved."]
+    if unmatched:
+        lines.append("Not found in plan (run analyze first):")
+        lines.extend(unmatched)
+    lines.append("Call apply next to execute in a sandbox.")
+    return "\n".join(lines)
+
+
+@mcp.tool()
 def contracts(repo: str = "", force: bool = False) -> str:
     """Generate or refresh .importlinter contracts from current graph structure.
 

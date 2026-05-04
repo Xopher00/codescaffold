@@ -158,6 +158,12 @@ def _symbol_move_proposals(
             label = attrs.get("label", "")
             if not label:
                 continue
+            # Skip rationale/docstring nodes (graphify injects these as edge labels)
+            if attrs.get("file_type") == "rationale":
+                continue
+            # Skip labels that are clearly docstrings, not symbol names (contain spaces)
+            if " " in label:
+                continue
             # Skip file-level hub stubs (graphify synthetic nodes)
             if label == Path(file_path).name:
                 continue
