@@ -9,3 +9,4 @@ from .symbol_moves import _find_symbol_code
 from .symbol_moves import _organize_imports
 from .symbol_moves import _remove_symbol
 from .symbol_moves import apply_symbol_move
+from .package_api import privatize_if_internal
