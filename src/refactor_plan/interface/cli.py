@@ -5,11 +5,15 @@ from pathlib import Path
 import typer
 
 from refactor_plan.applicator.apply import apply_plan
+from refactor_plan.applicator.manifests import write_manifest
+from refactor_plan.applicator.models import ApplyResult, Escalation
+from refactor_plan.applicator.name_apply import apply_rename_map
 from refactor_plan.applicator.rollback import rollback as do_rollback
+from refactor_plan.applicator.rope_rename import rename_module, rename_symbol
 from refactor_plan.contracts.import_contracts import emit_contract
 from refactor_plan.interface.cluster_view import build_view
 from refactor_plan.interface.graph_bridge import ensure_graph
-from refactor_plan.naming.namer import name_clusters, write_rename_map
+from refactor_plan.naming.namer import RenameMap
 from refactor_plan.planning.planner import RefactorPlan, plan as build_plan, write_plan
 from refactor_plan.reporting.reporter import render_dry_run_report, write_report
 from refactor_plan.validation.validator import validate as do_validate
@@ -125,24 +129,6 @@ def rollback(
 
 
 @app.command()
-def name(
-    repo: Path = typer.Argument(..., help="Path to target repository"),
-    model: str = typer.Option("claude-opus-4-7", help="Claude model to use"),
-) -> None:
-    """LLM naming pass: propose semantic names for pkg_NNN placeholders."""
-    repo = repo.resolve()
-    graph_path = ensure_graph(repo)
-    view = build_view(graph_path)
-    refactor_plan = _load_plan(repo)
-    rename_map = name_clusters(refactor_plan, view, repo, graph_path, model=model)
-    out_path = _out_dir(repo) / "rename_map.json"
-    write_rename_map(rename_map, out_path)
-    typer.echo(f"Rename map: {out_path}")
-    for entry in rename_map.entries:
-        typer.echo(f"  {entry.old_name} → {entry.new_name}")
-
-
-@app.command()
 def contracts(
     repo: Path = typer.Argument(..., help="Path to target repository"),
     root_package: str = typer.Option("refactor_plan", help="Root package for import-linter"),
@@ -155,3 +141,102 @@ def contracts(
     artifact = emit_contract(refactor_plan, view, graph_path, repo, root_package=root_package)
     typer.echo(f".importlinter: {artifact.config_path}")
     typer.echo(f"  {len(artifact.contracts)} contract(s) emitted")
+
+
+@app.command(name="apply-names")
+def apply_names(
+    repo: Path = typer.Argument(..., help="Path to target repository"),
+    dry_run: bool = typer.Option(True, help="Show what would be renamed. Pass --no-dry-run to execute."),
+) -> None:
+    """Apply rename_map.json: rename pkg_NNN packages to semantic names."""
+    repo = repo.resolve()
+    refactor_plan = _load_plan(repo)
+
+    rename_map_path = _out_dir(repo) / "rename_map.json"
+    if not rename_map_path.exists():
+        typer.echo(f"No rename map at {rename_map_path}. Run `name` first.", err=True)
+        raise typer.Exit(code=1)
+    rename_map = RenameMap.model_validate_json(rename_map_path.read_text(encoding="utf-8"))
+
+    if not rename_map.entries:
+        typer.echo("Rename map is empty — nothing to apply.")
+        return
+
+    result = apply_rename_map(rename_map, refactor_plan, repo, _out_dir(repo), dry_run=dry_run)
+
+    if dry_run:
+        typer.echo(f"Would rename {len(result.applied)} package(s):")
+        for action in result.applied:
+            src_name = Path(action.source).name
+            dest_name = Path(action.dest).name
+            typer.echo(f"  {src_name} → {dest_name}")
+        if result.skipped:
+            typer.echo(f"  {len(result.skipped)} skipped (directory missing)")
+        if result.failed:
+            for e in result.failed:
+                typer.echo(f"  [skip] {e.source}: {e.reason}", err=True)
+        typer.echo("Dry-run complete. Pass --no-dry-run to execute.")
+        return
+
+    typer.echo(
+        f"Renamed: {len(result.applied)}  "
+        f"Failed: {len(result.failed)}  "
+        f"Skipped: {len(result.skipped)}"
+    )
+    for action in result.applied:
+        src_name = Path(action.source).name
+        dest_name = Path(action.dest).name
+        strat = action.strategy.value if action.strategy else "?"
+        typer.echo(f"  {src_name} → {dest_name}  [{strat}, {action.imports_rewritten} import(s) rewritten]")
+    for e in result.failed:
+        typer.echo(f"  [FAIL] {e.source}: {e.reason}", err=True)
+
+
+@app.command()
+def rename(
+    repo: Path = typer.Argument(..., help="Path to target repository"),
+    target: str = typer.Argument(
+        ...,
+        help=(
+            "What to rename. Formats: "
+            "'src/pkg/mod.py::MyFunc' (symbol), "
+            "'src/pkg/mod.py' (module file), "
+            "'src/pkg/' (package directory)."
+        ),
+    ),
+    to: str = typer.Option(..., "--to", help="New name (simple identifier, no path)"),
+    dry_run: bool = typer.Option(True, help="Preview changes. Pass --no-dry-run to apply."),
+) -> None:
+    """Rename a symbol, module, or package — propagates to all call sites."""
+    repo = repo.resolve()
+
+    if "::" in target:
+        file_part, symbol_name = target.split("::", 1)
+        file_path = (repo / file_part).resolve()
+        action = rename_symbol(repo, file_path, symbol_name, to, dry_run=dry_run)
+    else:
+        module_path = (repo / target).resolve()
+        action = rename_module(repo, module_path, to, dry_run=dry_run)
+
+    if isinstance(action, Escalation):
+        typer.echo(f"[FAIL] {action.reason}", err=True)
+        raise typer.Exit(code=1)
+
+    if dry_run:
+        typer.echo(f"Would rename '{target}' → '{to}'")
+        typer.echo(f"  Files that would change: {len(action.files_touched)}")
+        for f in sorted(action.files_touched):
+            typer.echo(f"    {f}")
+        typer.echo("Dry-run complete. Pass --no-dry-run to apply.")
+        return
+
+    typer.echo(f"Renamed '{target}' → '{to}'")
+    typer.echo(f"  Strategy: {action.strategy.value if action.strategy else '?'}")
+    typer.echo(f"  Files touched: {len(action.files_touched)}")
+    typer.echo(f"  Imports rewritten: {action.imports_rewritten}")
+
+    out_dir = _out_dir(repo)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    write_manifest(ApplyResult(applied=[action]), out_dir)
+
+

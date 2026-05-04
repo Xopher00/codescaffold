@@ -25,6 +25,7 @@ class FileRef:
 class MoveKind(str, Enum):
     FILE = "FILE"
     SYMBOL = "SYMBOL"
+    PACKAGE = "PACKAGE"
 
 
 class MoveStrategy(str, Enum):

@@ -13,9 +13,13 @@ from refactor_plan.applicator.file_moves import apply_file_move
 from refactor_plan.applicator.import_rewrites import MoveRecord, rewrite_cross_cluster_imports
 from refactor_plan.applicator.manifests import read_manifest, read_stray_manifest, write_manifest, write_stray_manifest
 from refactor_plan.applicator.models import AppliedAction, ApplyResult, Escalation, MoveKind, MoveStrategy
+from refactor_plan.applicator.name_apply import apply_rename_map
 from refactor_plan.applicator.rollback import rollback
+from refactor_plan.applicator.rope_rename import _find_symbol_offset, rename_module, rename_symbol
 from refactor_plan.applicator.symbol_moves import _organize_imports
 from refactor_plan.applicator.symbol_moves import apply_symbol_move
+from refactor_plan.naming.namer import RenameEntry, RenameMap
+from refactor_plan.planning.planner import ClusterInfo, RefactorPlan
 
 
 # ---------------------------------------------------------------------------
@@ -396,3 +400,186 @@ def test_apply_plan_symbol_move_compileall(messy_repo: Path) -> None:
         capture_output=True,
     )
     assert proc.returncode == 0, proc.stderr.decode()
+
+
+# ---------------------------------------------------------------------------
+# apply_rename_map
+# ---------------------------------------------------------------------------
+
+def _pkg_repo(tmp_path: Path) -> tuple[Path, RefactorPlan, RenameMap]:
+    """Fixture helper: a repo with pkg_001/ and a caller that imports from it."""
+    pkg = tmp_path / "src" / "pkg_001"
+    pkg.mkdir(parents=True)
+    (pkg / "__init__.py").write_text("")
+    (pkg / "core.py").write_text("def compute():\n    return 1\n")
+    caller = tmp_path / "src" / "main.py"
+    caller.write_text("from pkg_001.core import compute\n\nresult = compute()\n")
+
+    plan = RefactorPlan(clusters=[
+        ClusterInfo(
+            community_id=1,
+            source_files=[str(pkg / "core.py")],
+            proposed_package=str(pkg),
+        )
+    ])
+    rename_map = RenameMap(entries=[RenameEntry(old_name="pkg_001", new_name="mypackage")])
+    return tmp_path, plan, rename_map
+
+
+def test_apply_rename_map_dry_run(tmp_path: Path) -> None:
+    repo, plan, rename_map = _pkg_repo(tmp_path)
+    out_dir = repo / ".refactor_plan"
+    result = apply_rename_map(rename_map, plan, repo, out_dir, dry_run=True)
+
+    assert len(result.applied) == 1
+    assert result.applied[0].source.endswith("pkg_001")
+    assert result.applied[0].dest.endswith("mypackage")
+    # No filesystem change
+    assert (repo / "src" / "pkg_001").exists()
+    assert not (repo / "src" / "mypackage").exists()
+
+
+def test_apply_rename_map_rope(tmp_path: Path) -> None:
+    repo, plan, rename_map = _pkg_repo(tmp_path)
+    out_dir = repo / ".refactor_plan"
+    result = apply_rename_map(rename_map, plan, repo, out_dir, dry_run=False)
+
+    assert len(result.applied) == 1, result.failed
+    assert result.applied[0].strategy in (MoveStrategy.ROPE, MoveStrategy.LIBCST)
+    # Old directory gone, new one present
+    assert not (repo / "src" / "pkg_001").exists()
+    assert (repo / "src" / "mypackage").exists()
+    # Caller import was rewritten
+    caller_text = (repo / "src" / "main.py").read_text()
+    assert "pkg_001" not in caller_text
+    assert "mypackage" in caller_text
+
+
+def test_apply_rename_map_unknown_package(tmp_path: Path) -> None:
+    repo, plan, _ = _pkg_repo(tmp_path)
+    rename_map = RenameMap(entries=[RenameEntry(old_name="pkg_999", new_name="other")])
+    out_dir = repo / ".refactor_plan"
+    result = apply_rename_map(rename_map, plan, repo, out_dir, dry_run=False)
+
+    assert len(result.failed) == 1
+    assert "pkg_999" in result.failed[0].reason
+
+
+def test_apply_rename_map_missing_directory(tmp_path: Path) -> None:
+    repo, plan, rename_map = _pkg_repo(tmp_path)
+    # Remove the directory so it no longer exists
+    import shutil
+    shutil.rmtree(repo / "src" / "pkg_001")
+    out_dir = repo / ".refactor_plan"
+    result = apply_rename_map(rename_map, plan, repo, out_dir, dry_run=False)
+
+    assert len(result.skipped) == 1
+
+
+# ---------------------------------------------------------------------------
+# _find_symbol_offset
+# ---------------------------------------------------------------------------
+
+def test_find_symbol_offset_function() -> None:
+    src = "def helper():\n    return 42\n"
+    offset = _find_symbol_offset(src, "helper")
+    assert offset is not None
+    assert src[offset:offset + 6] == "helper"
+
+
+def test_find_symbol_offset_class() -> None:
+    src = "class MyModel:\n    pass\n"
+    offset = _find_symbol_offset(src, "MyModel")
+    assert offset is not None
+    assert src[offset:offset + 7] == "MyModel"
+
+
+def test_find_symbol_offset_missing() -> None:
+    assert _find_symbol_offset("def foo():\n    pass\n", "bar") is None
+
+
+def test_find_symbol_offset_async_function() -> None:
+    src = "async def fetch():\n    pass\n"
+    offset = _find_symbol_offset(src, "fetch")
+    assert offset is not None
+    assert src[offset:offset + 5] == "fetch"
+
+
+def test_find_symbol_offset_first_when_duplicate() -> None:
+    src = "def helper():\n    pass\n\nclass MyClass:\n    def helper(self):\n        pass\n"
+    offset = _find_symbol_offset(src, "helper")
+    # First definition (top-level function) should win
+    assert offset == src.index("helper")
+
+
+# ---------------------------------------------------------------------------
+# rename_symbol
+# ---------------------------------------------------------------------------
+
+def test_rename_symbol_dry_run(tmp_path: Path) -> None:
+    f = tmp_path / "mod.py"
+    f.write_text("def helper():\n    return 42\n\ndef caller():\n    return helper()\n")
+    original = f.read_text()
+    action = rename_symbol(tmp_path, f, "helper", "compute", dry_run=True)
+    assert not isinstance(action, Escalation)
+    assert action.symbol == "helper"
+    assert f.read_text() == original  # unchanged
+
+
+def test_rename_symbol_propagates_cross_file(tmp_path: Path) -> None:
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    (tmp_path / "pkg" / "utils.py").write_text("def helper():\n    return 42\n")
+    (tmp_path / "pkg" / "main.py").write_text(
+        "from pkg.utils import helper\n\ndef run():\n    return helper()\n"
+    )
+    action = rename_symbol(tmp_path, tmp_path / "pkg" / "utils.py", "helper", "compute")
+    assert not isinstance(action, Escalation)
+    assert len(action.files_touched) == 2
+    assert "pkg_001" not in (tmp_path / "pkg" / "utils.py").read_text()
+    utils_text = (tmp_path / "pkg" / "utils.py").read_text()
+    main_text = (tmp_path / "pkg" / "main.py").read_text()
+    assert "def compute" in utils_text
+    assert "helper" not in utils_text
+    assert "compute" in main_text
+    assert "helper" not in main_text
+
+
+def test_rename_symbol_missing_symbol(tmp_path: Path) -> None:
+    f = tmp_path / "mod.py"
+    f.write_text("def foo():\n    pass\n")
+    action = rename_symbol(tmp_path, f, "nonexistent", "other")
+    assert isinstance(action, Escalation)
+    assert "nonexistent" in action.reason
+
+
+# ---------------------------------------------------------------------------
+# rename_module
+# ---------------------------------------------------------------------------
+
+def test_rename_module_file(tmp_path: Path) -> None:
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    (tmp_path / "pkg" / "utils.py").write_text("def foo():\n    pass\n")
+    (tmp_path / "pkg" / "main.py").write_text("from pkg.utils import foo\n")
+    action = rename_module(tmp_path, tmp_path / "pkg" / "utils.py", "helpers")
+    assert not isinstance(action, Escalation)
+    assert (tmp_path / "pkg" / "helpers.py").exists()
+    assert not (tmp_path / "pkg" / "utils.py").exists()
+    assert "helpers" in (tmp_path / "pkg" / "main.py").read_text()
+
+
+def test_rename_module_missing_path(tmp_path: Path) -> None:
+    action = rename_module(tmp_path, tmp_path / "nonexistent.py", "other")
+    assert isinstance(action, Escalation)
+
+
+def test_rename_module_dry_run(tmp_path: Path) -> None:
+    (tmp_path / "pkg").mkdir()
+    (tmp_path / "pkg" / "__init__.py").write_text("")
+    (tmp_path / "pkg" / "utils.py").write_text("def foo():\n    pass\n")
+    original = (tmp_path / "pkg" / "utils.py").read_text()
+    action = rename_module(tmp_path, tmp_path / "pkg" / "utils.py", "helpers", dry_run=True)
+    assert not isinstance(action, Escalation)
+    assert (tmp_path / "pkg" / "utils.py").read_text() == original  # unchanged
+    assert action.dest.endswith("helpers.py")
