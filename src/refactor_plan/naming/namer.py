@@ -136,7 +136,7 @@ def write_rename_map(rename_map: RenameMap, path: Path) -> Path:
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _strip_json_fence(text: str) -> str:
+def _strip_code_fence(text: str) -> str:
     """Remove ```json ... ``` or ``` ... ``` wrappers Claude sometimes adds."""
     match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
     return match.group(1) if match else text
