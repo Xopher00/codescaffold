@@ -162,8 +162,10 @@ def _check_circular_import_risks(
     # Case 1 (removed): "symbol uses names defined in dest_module" is not a risk.
     # apply_symbol_move already drops those imports — they become same-file calls.
 
-    # Case 2: dest file already imports from src_module — adding the symbol
-    # there would create a reverse dependency cycle.
+    # Case 2: dest already imports src AND symbol is still referenced in src
+    # after removal — back-import would then create a cycle.
+    # If the symbol is not referenced in the source after removal, no
+    # back-import fires and there is no cycle.
     if dest_path.exists() and src_module:
         dest_imports = _all_imported_modules(dest_path)
         colliding = [
@@ -171,11 +173,25 @@ def _check_circular_import_risks(
             if m == src_module or m.startswith(src_module + ".")
         ]
         if colliding:
-            risks.append(
-                f"Reverse dependency: destination '{dest_path.name}' already imports "
-                f"from '{src_module}' ({', '.join(colliding)}). "
-                f"Moving '{symbol_name}' there would create a cycle."
-            )
+            # Check if symbol is referenced in the source outside its definition
+            src_text = src_path.read_text(encoding="utf-8")
+            try:
+                src_ast = _ast.parse(src_text)
+                refs = [
+                    n for n in _ast.walk(src_ast)
+                    if isinstance(n, _ast.Name) and n.id == symbol_name
+                ]
+                # More than one reference means it's called somewhere (the definition itself is one)
+                # Actually definitions aren't Name nodes — any Name match means a call/reference
+                still_referenced = len(refs) > 0
+            except SyntaxError:
+                still_referenced = True  # conservative
+            if still_referenced:
+                risks.append(
+                    f"Reverse dependency: destination '{dest_path.name}' already imports "
+                    f"from '{src_module}' ({', '.join(colliding)}). "
+                    f"Moving '{symbol_name}' there would create a cycle."
+                )
 
     return risks
 
