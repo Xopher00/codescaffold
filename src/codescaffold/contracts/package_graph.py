@@ -7,7 +7,7 @@ from pathlib import Path
 
 import networkx as nx
 
-from codescaffold.graphify.snapshot import GraphSnapshot
+from codescaffold.graphify import GraphSnapshot
 
 
 def build_package_dag(

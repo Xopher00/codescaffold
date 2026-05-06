@@ -9,7 +9,7 @@ from pathlib import Path
 
 import networkx as nx
 
-from codescaffold.graphify.snapshot import GraphSnapshot
+from codescaffold.graphify import GraphSnapshot
 
 from .cycles import detect_package_cycles
 from .models import ContractArtifact

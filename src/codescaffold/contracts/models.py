@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from codescaffold.candidates.models import MoveCandidate
+from codescaffold.candidates import MoveCandidate
 
 
 @dataclass(frozen=True)

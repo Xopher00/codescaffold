@@ -7,7 +7,7 @@ import json
 from dataclasses import dataclass
 
 import networkx as nx
-from graphify.cluster import cluster, cohesion_score, score_all
+from .vendor import cluster, cohesion_score, score_all
 
 
 @dataclass(frozen=True)

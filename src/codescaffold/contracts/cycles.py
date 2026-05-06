@@ -9,8 +9,8 @@ from pathlib import Path
 import grimp
 import networkx as nx
 
-from codescaffold.candidates.models import MoveCandidate
-from codescaffold.graphify.snapshot import GraphSnapshot
+from codescaffold.candidates import MoveCandidate
+from codescaffold.graphify import GraphSnapshot
 
 from .models import CycleReport
 from .package_graph import detect_root_package

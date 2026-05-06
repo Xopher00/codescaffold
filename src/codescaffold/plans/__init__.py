@@ -1,5 +1,5 @@
 from .schema import ApprovedMove, CandidateRecord, Plan
-from .store import StalePlanError, assert_fresh, load, save
+from .store import StalePlanError, assert_fresh, load, save,  candidates_to_records
 
 __all__ = [
     "Plan",
@@ -9,4 +9,5 @@ __all__ = [
     "save",
     "load",
     "assert_fresh",
+    "candidates_to_records"
 ]

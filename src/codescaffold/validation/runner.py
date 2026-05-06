@@ -8,7 +8,7 @@ from pathlib import Path
 from typing import TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from codescaffold.contracts.models import ViolationReport
+    from codescaffold.contracts import ViolationReport
 
 
 @dataclass(frozen=True)
@@ -64,7 +64,7 @@ def run_validation(repo: Path) -> ValidationResult:
     # --- import-linter contracts (opt-in: only if .importlinter exists) ---
     contracts_ok = True
     if (repo / ".importlinter").exists():
-        from codescaffold.contracts.validator import run_lint_imports
+        from codescaffold.contracts import run_lint_imports
         cr = run_lint_imports(repo)
         contracts_ok = cr.succeeded
         if not contracts_ok:

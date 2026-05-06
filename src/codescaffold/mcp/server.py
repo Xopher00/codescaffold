@@ -2,7 +2,7 @@
 
 from mcp.server.fastmcp import FastMCP
 
-from codescaffold.mcp.tools import (
+from .tools import (
     analyze,
     approve_moves,
     apply,

@@ -7,9 +7,9 @@ from pathlib import Path
 
 import networkx as nx
 
-from codescaffold.candidates.models import MoveCandidate
-from codescaffold.graphify.snapshot import GraphSnapshot
-from codescaffold.plans.schema import ApprovedMove
+from codescaffold.candidates import MoveCandidate
+from codescaffold.graphify import GraphSnapshot
+from codescaffold.plans import ApprovedMove
 
 from .package_graph import _file_to_subpackage, build_package_dag
 

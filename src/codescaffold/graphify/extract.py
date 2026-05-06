@@ -3,11 +3,9 @@
 from __future__ import annotations
 
 from pathlib import Path
+import networkx as nx
 
-from graphify.build import build_from_json
-from graphify.extract import collect_files
-from graphify.extract import extract as _extract
-
+from .vendor import build_from_json, collect_files, _extract
 from .snapshot import GraphSnapshot
 
 
@@ -20,7 +18,7 @@ def run_extract(repo_path: Path, *, directed: bool = True) -> GraphSnapshot:
 
     directed=False falls back to an undirected graph (legacy behaviour).
     """
-    import networkx as nx
+    
 
     repo_path = Path(repo_path).resolve()
     files = collect_files(repo_path)

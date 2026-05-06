@@ -8,9 +8,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from graphify.analyze import god_nodes as _god_nodes
-from graphify.analyze import surprising_connections as _surprising_connections
-
+from .vendor import _god_nodes, _surprising_connections
 from .snapshot import GraphSnapshot
 
 

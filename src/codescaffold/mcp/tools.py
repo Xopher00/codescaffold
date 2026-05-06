@@ -10,33 +10,37 @@ import json
 import subprocess
 from pathlib import Path
 
-from codescaffold.audit.record import ApplyAudit
-from codescaffold.candidates.propose import propose_moves
-from codescaffold.contracts.cycles import detect_package_cycles
-from codescaffold.contracts.generator import generate_importlinter_config
-from codescaffold.contracts.validator import run_lint_imports
-from codescaffold.contracts.violation_fix import propose_alternatives
-from codescaffold.graphify.analysis import cohesion, god_nodes, surprises
-from codescaffold.graphify.extract import run_extract
+from codescaffold.audit import ApplyAudit
+from codescaffold.candidates import propose_moves
+from codescaffold.contracts import (
+    detect_package_cycles, 
+    generate_importlinter_config, 
+    run_lint_imports, 
+    propose_alternatives,
+)
+from codescaffold.graphify import cohesion, god_nodes, surprises, run_extract
 from codescaffold.operations import (
     RopeOperationError,
     close_rope_project,
     move_module,
     move_symbol,
 )
-from codescaffold.plans.schema import ApprovedMove, Plan
-from codescaffold.plans.store import (
+from codescaffold.plans import (
+    ApprovedMove,
+    Plan,
     StalePlanError,
     assert_fresh,
     candidates_to_records,
     load,
     save,
 )
-from codescaffold.sandbox.worktree import SandboxError
-from codescaffold.sandbox.worktree import create_sandbox as _create_sandbox
-from codescaffold.sandbox.worktree import discard_sandbox as _discard_sandbox
-from codescaffold.sandbox.worktree import merge_sandbox as _merge_sandbox
-from codescaffold.validation.runner import run_validation
+from codescaffold.sandbox import (
+    create_sandbox as _create_sandbox,
+    discard_sandbox as _discard_sandbox,
+    merge_sandbox as _merge_sandbox,
+    SandboxError
+)
+from codescaffold.validation import run_validation
 
 
 def _plan_path(repo_path: str) -> Path:

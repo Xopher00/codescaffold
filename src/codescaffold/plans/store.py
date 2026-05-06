@@ -5,8 +5,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from codescaffold.candidates.models import MoveCandidate
-from codescaffold.graphify.snapshot import GraphSnapshot
+from codescaffold.candidates import MoveCandidate
+from codescaffold.graphify import GraphSnapshot
 
 from .schema import ApprovedMove, CandidateRecord, Plan
 
