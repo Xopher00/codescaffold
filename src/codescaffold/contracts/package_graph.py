@@ -20,6 +20,9 @@ def build_package_dag(
     Groups symbol nodes by their immediate subpackage (rootpkg.subpkg).
     When root_package is given, only nodes under that package are included,
     excluding tests, fixtures, and sibling packages in the same repo.
+
+    Also handles graphify package-reference nodes (e.g. 'codescaffold_sandbox')
+    that are created for cross-package imports and carry no source_file attribute.
     Returns a DiGraph whose nodes are subpackage strings and edges are import
     relationships.
     """
@@ -28,6 +31,8 @@ def build_package_dag(
     for node in G.nodes():
         src = G.nodes[node].get("source_file", "")
         pkg = _file_to_subpackage(src, src_root)
+        if not pkg and root_package:
+            pkg = _pkg_ref_node_to_package(node, root_package)
         if pkg and (
             root_package is None
             or pkg.startswith(root_package + ".")
@@ -76,6 +81,23 @@ def _file_to_subpackage(source_file: str, src_root: str = "src") -> str | None:
         # File is directly in rootpkg/
         return root
     return f"{root}.{sub}"
+
+
+def _pkg_ref_node_to_package(node_id: str, root_package: str) -> str | None:
+    """Map a graphify package-reference node to its dotted package name.
+
+    Graphify creates nodes like 'codescaffold_sandbox' for cross-package imports
+    whose target is a package, not a source file. These nodes have no source_file
+    attribute. Recognise the pattern '{root}_{subpkg}' and convert to dotted form.
+    Only single-component subpackage names are matched to avoid false positives
+    on deeper node IDs like 'codescaffold_mcp_tools'.
+    """
+    prefix = root_package + "_"
+    if node_id.startswith(prefix):
+        sub = node_id[len(prefix):]
+        if sub and "_" not in sub:
+            return f"{root_package}.{sub}"
+    return None
 
 
 def detect_root_package(repo_path: Path) -> str:

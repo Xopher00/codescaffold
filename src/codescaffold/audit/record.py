@@ -7,9 +7,9 @@ from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 
-from codescaffold.operations.results import RopeChangeResult
-from codescaffold.plans.schema import ApprovedMove
-from codescaffold.validation.runner import ValidationResult
+from codescaffold.operations import RopeChangeResult
+from codescaffold.plans import ApprovedMove
+from codescaffold.validation import ValidationResult
 
 
 @dataclass(frozen=True)
