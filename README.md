@@ -129,41 +129,35 @@ Exact configuration depends on the agent or client you use.
 
 ```text
 analyze
-validate
-rollback
+get_cluster_context
 approve_moves
 apply
-get_cluster_context
-apply_rename_map
-rename
+validate
 merge_sandbox
 discard_sandbox
 reset
-get_symbol_context
-insert_docstring
 contracts
 validate_contracts
+update_contract
+propose_violation_fix
 ```
 
 ### Tool roles
 
-| Tool                  | Purpose                                                            |
-| --------------------- | ------------------------------------------------------------------ |
-| `analyze`             | Build or refresh graph-derived refactor plan artifacts             |
-| `get_cluster_context` | Show graph evidence for a cluster/community                        |
-| `approve_moves`       | Mark selected proposed moves as approved                           |
-| `apply`               | Apply approved moves in a sandboxed worktree                       |
-| `apply_rename_map`    | Rename placeholder packages/modules/symbols after structural moves |
-| `rename`              | Perform an ad-hoc rope-backed rename                               |
-| `get_symbol_context`  | Show graph context for a symbol                                    |
-| `insert_docstring`    | Insert or replace a symbol docstring                               |
-| `contracts`           | Generate or refresh import-linter contracts                        |
-| `validate_contracts`  | Run import-linter against generated contracts                      |
-| `validate`            | Run staged validation                                              |
-| `rollback`            | Roll back recent applied changes where supported                   |
-| `merge_sandbox`       | Merge a completed sandbox branch                                   |
-| `discard_sandbox`     | Discard a sandbox branch                                           |
-| `reset`               | Clear stale generated state/artifacts                              |
+| Tool                    | Purpose                                                                        |
+| ----------------------- | ------------------------------------------------------------------------------ |
+| `analyze`               | Run graphify, propose move candidates, persist a plan                          |
+| `get_cluster_context`   | Show graph evidence for a community/cluster                                    |
+| `approve_moves`         | Record agent-approved moves into the persisted plan                            |
+| `apply`                 | Execute approved moves in a sandboxed worktree; runs compileall + pytest       |
+| `validate`              | Re-run compileall + pytest inside an existing sandbox branch                   |
+| `merge_sandbox`         | Merge a completed sandbox branch into HEAD with --no-ff                        |
+| `discard_sandbox`       | Discard a sandbox branch and remove its worktree                               |
+| `reset`                 | Delete the persisted plan and audit records                                    |
+| `contracts`             | Generate `.importlinter` from current graph layers; surface cycle-break moves if cyclic |
+| `validate_contracts`    | Run lint-imports and return a formatted pass/fail report                       |
+| `update_contract`       | Regenerate `.importlinter` from a sandbox's post-move state                    |
+| `propose_violation_fix` | Suggest alternative move targets that satisfy the existing contract layers     |
 
 ## Typical workflow
 
@@ -419,42 +413,38 @@ codescaffold-mcp
 
 ## Project layout
 
-High-level package areas:
-
 ```text
-src/refactor_plan/
-    mcp_server.py        MCP server entry point
-    interface/           graph/worktree/user-facing interface utilities
-    planning/            refactor plan construction
-    execution/           mechanical apply/import rewrite operations
-    records/             move/apply state records
-    validation/          compile/import/test validation
-    contracts/           import-linter contract generation
-    naming/              rename/docstring support
-    reporting/           structure reports
+src/codescaffold/
+    mcp/           thin MCP interface (tools.py, server.py)
+    graphify/      graphify integration and graph snapshots
+    candidates/    graph-informed move candidate proposals
+    plans/         plan schema, lifecycle, approval, staleness
+    operations/    typed mechanical Rope operations
+    sandbox/       git worktree isolation
+    validation/    compileall + pytest + import-linter checks
+    contracts/     import-linter contract generation and violation recovery
+    audit/         result summaries and durable records
 ```
 
 ## Roadmap
 
-Near-term priorities:
+Near-term:
 
-* improve graph evidence shown in `get_cluster_context`
-* make placement guidance less biased toward current layout
-* preserve richer audit trails for sandbox merges
-* clarify contract lifecycle
-* improve merge summaries
-* replace or update stale demo/example code
-* expose graphify-style graph queries more directly
-* add safer generated smoke probes for importability
+* `apply_rename_map` — batch-rename symbols/modules from a name mapping in a single sandbox pass
+* richer `get_cluster_context` — show inter-community edge weights and dominant source files
 
-Later possibilities:
+Later:
 
-* read-only duplicate-logic/equivalence reports
-* canonical symbol ownership proposals
-* richer symbol-level move planning
-* import-cycle-aware placement suggestions
-* contract staleness detection
-* stronger generated architecture reports
+* **Pynguin test generation** — `generate_tests(source_file, repo_path)` MCP tool wrapping
+  [pynguin](https://github.com/se2p/pynguin) for automatic test generation.
+  Design constraints: run pynguin via subprocess into the repo's own venv (never import it
+  into the MCP process — it instruments modules at runtime); write generated tests into a
+  sandbox worktree so the agent can review and approve before committing, mirroring the
+  `apply → audit → merge_sandbox` flow.
+* contract staleness detection and incremental update
+* docstring insertion (LibCST-based)
+* rollback/manifest for applied moves
+* read-only duplicate-logic reports
 
 ## License
 

@@ -12,3 +12,12 @@ dist/
 .importlinter
 .refactor_plan_team_config.json
 .claude/
+# local venvs
+.venv/
+.mcp-import-test-venv/
+# grimp analysis cache
+.grimp_cache/
+# codescaffold sandbox worktrees
+.worktrees/
+# Jupyter
+.ipynb_checkpoints/
