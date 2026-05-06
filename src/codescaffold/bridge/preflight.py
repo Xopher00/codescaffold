@@ -1,0 +1,6 @@
+## This is placeholder code, taken from the plan tender-imgining-bird.md. It is not finished and may need modification. Do not take as gospel
+# from codescaffold.candidates import MoveCandidate
+# from .resolution import RopeResolution
+
+# def resolve_candidate(candidate: MoveCandidate, repo_path: Path) -> RopeResolution: ...
+# def preflight_status(resolution: RopeResolution) -> Literal["ready", "needs_review", "blocked"]: ...

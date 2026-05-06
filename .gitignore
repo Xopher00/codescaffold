@@ -23,3 +23,6 @@ dist/
 .ipynb_checkpoints/
 .claude/cache/
 .claude/project-api-surface.md
+# headroom
+headroom_memory.db
+.headroom
