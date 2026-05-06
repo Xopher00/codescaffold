@@ -27,7 +27,7 @@ def generate_importlinter_config(repo_path: Path, snap: GraphSnapshot) -> Contra
     If the graph is acyclic, writes .importlinter and returns written=True.
     """
     repo_path = Path(repo_path).resolve()
-    cycles = detect_package_cycles(snap)
+    cycles = detect_package_cycles(repo_path, snap)
 
     config_path = str(repo_path / _CONFIG_FILENAME)
 
@@ -41,11 +41,15 @@ def generate_importlinter_config(repo_path: Path, snap: GraphSnapshot) -> Contra
         )
 
     root_package = detect_root_package(repo_path)
-    dag = build_package_dag(snap)
+    dag = build_package_dag(snap, root_package=root_package)
 
-    # Compute topological layers (highest = most upstream / lowest level)
+    # Condense SCCs so topological_generations works even if the graphify
+    # semantic graph has cycles (which are not Python import cycles).
+    sccs = list(nx.strongly_connected_components(dag))
+    scc_dag = nx.condensation(dag, scc=sccs)
     layers: tuple[tuple[str, ...], ...] = tuple(
-        tuple(gen) for gen in nx.topological_generations(dag)
+        tuple(pkg for scc_id in gen for pkg in sorted(sccs[scc_id]))
+        for gen in nx.topological_generations(scc_dag)
     )
 
     # Strip root_package prefix for relative names in the contract
@@ -102,7 +106,8 @@ def _render_config(
         "# Do not edit by hand — regenerate via the `contracts` MCP tool.",
         "",
         "[importlinter]",
-        f'root_package = "{root_package}"',
+        "root_packages =",
+        f"    {root_package}",
         "",
         "[importlinter:contract:layers]",
         "name = Layer contract",
@@ -110,12 +115,13 @@ def _render_config(
     ]
 
     # Emit layers from top (most downstream) to bottom (most upstream)
-    layer_strs = [" | ".join(sorted(layer)) for layer in reversed(layers) if layer]
+    layer_strs = [" | ".join(sorted(layer)) for layer in layers if layer]
     if layer_strs:
         lines.append("layers =")
         for ls in layer_strs:
             lines.append(f"    {ls}")
-    lines.append(f'containers = "{root_package}"')
+    lines.append("containers =")
+    lines.append(f"    {root_package}")
 
     if forbidden:
         lines += ["", "[importlinter:contract:no-surprising-deps]"]

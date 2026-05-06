@@ -10,10 +10,16 @@ import networkx as nx
 from codescaffold.graphify.snapshot import GraphSnapshot
 
 
-def build_package_dag(snap: GraphSnapshot, src_root: str = "src") -> nx.DiGraph:
+def build_package_dag(
+    snap: GraphSnapshot,
+    src_root: str = "src",
+    root_package: str | None = None,
+) -> nx.DiGraph:
     """Build a directed package-level graph from a GraphSnapshot.
 
     Groups symbol nodes by their immediate subpackage (rootpkg.subpkg).
+    When root_package is given, only nodes under that package are included,
+    excluding tests, fixtures, and sibling packages in the same repo.
     Returns a DiGraph whose nodes are subpackage strings and edges are import
     relationships.
     """
@@ -22,13 +28,18 @@ def build_package_dag(snap: GraphSnapshot, src_root: str = "src") -> nx.DiGraph:
     for node in G.nodes():
         src = G.nodes[node].get("source_file", "")
         pkg = _file_to_subpackage(src, src_root)
-        if pkg:
+        if pkg and (
+            root_package is None
+            or pkg.startswith(root_package + ".")
+        ):
             node_to_pkg[node] = pkg
 
     dag: nx.DiGraph = nx.DiGraph()
     dag.add_nodes_from(set(node_to_pkg.values()))
 
-    for u, v in G.edges():
+    for u, v, data in G.edges(data=True):
+        if data.get("relation") not in ("imports_from", "calls", "uses"):
+            continue
         pu = node_to_pkg.get(u)
         pv = node_to_pkg.get(v)
         if pu and pv and pu != pv:

@@ -1,10 +1,11 @@
-# Checkpoint — v2 Contracts Layer Complete
+# Checkpoint — Contracts DX + Layer Violations
 
 ## State
 
 All 9 layers implemented and tested.
 253 tests pass (including legacy `tests/old/` suite).
 `python -m compileall src/codescaffold/` is clean.
+`validate_contracts` now returns full lint-imports output (no 2000-char truncation).
 
 ## Test command
 

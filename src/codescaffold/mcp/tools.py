@@ -413,7 +413,7 @@ def validate_contracts(repo_path: str) -> str:
         f"Contracts failed: {result.contracts_failed}",
     ]
     if result.raw_output and result.raw_output != "(no .importlinter)":
-        lines += ["", "```", result.raw_output.strip()[:2000], "```"]
+        lines += ["", "```", result.raw_output.strip(), "```"]
     elif result.raw_output == "(no .importlinter)":
         lines.append("No .importlinter found — run `contracts` first.")
     return "\n".join(lines)

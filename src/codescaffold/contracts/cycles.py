@@ -2,26 +2,48 @@
 
 from __future__ import annotations
 
+import sys
 from collections import Counter
+from pathlib import Path
 
+import grimp
 import networkx as nx
 
 from codescaffold.candidates.models import MoveCandidate
 from codescaffold.graphify.snapshot import GraphSnapshot
 
 from .models import CycleReport
-from .package_graph import GraphSnapshot, build_package_dag
+from .package_graph import detect_root_package
 
 
-def detect_package_cycles(snap: GraphSnapshot, src_root: str = "src") -> list[CycleReport]:
-    """Detect package-level cycles and produce CycleReports with break suggestions.
+def detect_package_cycles(
+    repo_path: Path,
+    snap: GraphSnapshot,
+    src_root: str = "src",
+) -> list[CycleReport]:
+    """Detect package-level import cycles using grimp (excludes TYPE_CHECKING imports).
 
     Returns an empty list if the package graph is acyclic.
     """
-    dag = build_package_dag(snap, src_root)
-    raw_cycles = list(nx.simple_cycles(dag))
+    src = str(Path(repo_path) / src_root)
+    if src not in sys.path:
+        sys.path.insert(0, src)
+    root_pkg = detect_root_package(Path(repo_path))
+    g = grimp.build_graph(root_pkg, exclude_type_checking_imports=True)
+
+    dag: nx.DiGraph = nx.DiGraph()
+    for mod in g.modules:
+        parts = mod.split(".")
+        pkg = ".".join(parts[:2]) if len(parts) >= 2 else parts[0]
+        dag.add_node(pkg)
+        for upstream in g.find_modules_directly_imported_by(mod):
+            up_parts = upstream.split(".")
+            up_pkg = ".".join(up_parts[:2]) if len(up_parts) >= 2 else up_parts[0]
+            if pkg != up_pkg:
+                dag.add_edge(pkg, up_pkg)
+
     reports = []
-    for cycle in raw_cycles:
+    for cycle in nx.simple_cycles(dag):
         edges = tuple(zip(cycle, cycle[1:] + [cycle[0]]))
         suggested = _propose_cycle_break(cycle, snap, dag)
         reports.append(CycleReport(
@@ -37,13 +59,7 @@ def _propose_cycle_break(
     snap: GraphSnapshot,
     dag: nx.DiGraph,
 ) -> MoveCandidate | None:
-    """Find the best symbol to extract to break a package cycle.
-
-    Strategy: among the cross-cycle edges in the snapshot, find the symbol node
-    that has the fewest in-package neighbours relative to out-of-package ones.
-    That node is the "best extract" candidate because it already belongs
-    conceptually to the other package.
-    """
+    """Find the best symbol to extract to break a package cycle."""
     G = snap.graph
     cycle_set = set(pkg_cycle)
 
@@ -62,17 +78,13 @@ def _propose_cycle_break(
         node_pkg = node_to_pkg.get(node)
         if node_pkg not in cycle_set:
             continue
-
         neighbors = list(G.neighbors(node))
         if not neighbors:
             continue
-
         neighbor_pkgs = [node_to_pkg.get(nb) for nb in neighbors if node_to_pkg.get(nb)]
         external = [p for p in neighbor_pkgs if p in cycle_set and p != node_pkg]
         if not external:
             continue
-
-        # Node with highest fraction of cross-cycle neighbors → best extract candidate
         score = len(external) / len(neighbor_pkgs)
         if score > best_score:
             best_score = score
@@ -84,14 +96,12 @@ def _propose_cycle_break(
     source_file = G.nodes[best_node].get("source_file", "")
     label = G.nodes[best_node].get("label", best_node)
 
-    # Target: the cycle package that has the most neighbors of this node
     neighbor_pkgs = [node_to_pkg.get(nb) for nb in G.neighbors(best_node) if node_to_pkg.get(nb)]
     external_pkgs = [p for p in neighbor_pkgs if p in cycle_set and p != node_to_pkg.get(best_node)]
     if not external_pkgs:
         return None
     target_pkg = Counter(external_pkgs).most_common(1)[0][0]
 
-    # Find the most common source file in target package
     target_files = [
         G.nodes[n].get("source_file", "")
         for n in G.nodes()
