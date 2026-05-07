@@ -4,8 +4,9 @@ from mcp.server.fastmcp import FastMCP
 
 from .tools import (
     analyze,
-    approve_moves,
     apply,
+    apply_rename_map,
+    approve_moves,
     contracts,
     discard_sandbox,
     get_cluster_context,
@@ -32,6 +33,7 @@ for _fn in [
     get_cluster_context,
     approve_moves,
     apply,
+    apply_rename_map,
     validate,
     merge_sandbox,
     discard_sandbox,

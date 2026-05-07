@@ -27,7 +27,7 @@ def generate_importlinter_config(repo_path: Path, snap: GraphSnapshot) -> Contra
     If the graph is acyclic, writes .importlinter and returns written=True.
     """
     repo_path = Path(repo_path).resolve()
-    cycles = detect_package_cycles(repo_path, snap)
+    cycles = detect_package_cycles(snap)
 
     config_path = str(repo_path / _CONFIG_FILENAME)
 

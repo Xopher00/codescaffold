@@ -11,7 +11,7 @@ import subprocess
 from pathlib import Path
 
 from codescaffold.audit import ApplyAudit
-from codescaffold.bridge import resolve_candidates
+from codescaffold.bridge import preflight_status, resolve_candidates
 from codescaffold.candidates import propose_moves
 from codescaffold.contracts import (
     detect_package_cycles, 
@@ -21,14 +21,18 @@ from codescaffold.contracts import (
 )
 from codescaffold.graphify import cohesion, god_nodes, surprises, run_extract
 from codescaffold.operations import (
+    RenameEntry,
     RopeOperationError,
     close_rope_project,
     move_module,
     move_symbol,
+    rename_symbol_batch,
 )
 from codescaffold.plans import (
     ApprovedMove,
+    ApprovedRename,
     Plan,
+    RopeResolutionRecord,
     StalePlanError,
     assert_fresh,
     candidates_to_records,
@@ -551,4 +555,174 @@ def propose_violation_fix(branch_name: str, repo_path: str) -> str:
         lines.append(f"- {alt.kind}: {sym}`{alt.source_file}` → `{alt.target_file}` [{alt.confidence}]")
         for r in alt.reasons:
             lines.append(f"  - {r}")
+    return "\n".join(lines)
+
+
+def apply_rename_map(
+    repo_path: str,
+    branch_name: str,
+    rename_map: dict[str, dict[str, str]],
+) -> str:
+    """Batch-rename symbols across the repo in a sandbox.
+
+    rename_map shape:
+        {
+            "src/pkg/foo.py": {"OldClass": "NewClass", "old_fn": "new_fn"},
+        }
+
+    Preflights each rename via bridge before creating a sandbox. Blocked
+    symbols abort the whole batch; needs_review symbols warn and proceed.
+    Uses a single rope project session for all renames.
+    Does NOT merge — call `merge_sandbox` after reviewing the result.
+    """
+    if not rename_map:
+        return "ERROR: rename_map is empty — nothing to rename."
+
+    entries_flat: list[ApprovedRename] = []
+    for file_path, renames in rename_map.items():
+        if not isinstance(renames, dict):
+            return f"ERROR: rename_map['{file_path}'] must be a dict of {{old: new}}."
+        for old_name, new_name in renames.items():
+            if not old_name or not new_name:
+                return f"ERROR: empty old_name or new_name in rename_map['{file_path}']."
+            entries_flat.append(
+                ApprovedRename(file_path=file_path, old_name=old_name, new_name=new_name)
+            )
+
+    # Adapter satisfying bridge._Candidate Protocol (kind, source_file, symbol)
+    class _RenameAdapter:
+        kind = "symbol"
+
+        def __init__(self, entry: ApprovedRename) -> None:
+            self.source_file = entry.file_path
+            self.symbol = entry.old_name
+
+    proto_candidates = [_RenameAdapter(e) for e in entries_flat]
+    resolutions = resolve_candidates(proto_candidates, Path(repo_path))
+
+    stamped: list[ApprovedRename] = []
+    for entry, res in zip(entries_flat, resolutions):
+        pf = preflight_status(res)
+        rec = RopeResolutionRecord(
+            status=res.status,
+            symbol_kind=res.symbol_kind,
+            line=res.line,
+            near_misses=list(res.near_misses),
+            reason=res.reason,
+        )
+        stamped.append(
+            ApprovedRename(
+                file_path=entry.file_path,
+                old_name=entry.old_name,
+                new_name=entry.new_name,
+                resolution=rec,
+                preflight=pf,
+            )
+        )
+
+    blocked = [e for e in stamped if e.preflight == "blocked"]
+    if blocked:
+        lines = ["## Blocked renames — fix these before proceeding:", ""]
+        for e in blocked:
+            reason = e.resolution.reason if e.resolution else "unknown"
+            near = (
+                f" (did you mean: {', '.join(e.resolution.near_misses)})"
+                if e.resolution and e.resolution.near_misses
+                else ""
+            )
+            lines.append(f"  ✗ `{e.old_name}` in `{e.file_path}` — {reason}{near}")
+        return "\n".join(lines)
+
+    warnings_list = [
+        f"  ⚠ needs_review: `{e.old_name}` in `{e.file_path}`"
+        + (f" — {e.resolution.reason}" if e.resolution and e.resolution.reason else "")
+        for e in stamped
+        if e.preflight == "needs_review"
+    ]
+
+    snap = run_extract(Path(repo_path))
+    plan = Plan(graph_hash=snap.graph_hash, approved_renames=stamped)
+    save(plan, _plan_path(repo_path))
+
+    repo = Path(repo_path)
+    pre_apply_passed: bool | None = None
+    if (repo / ".importlinter").exists():
+        pre_cr = run_lint_imports(repo)
+        pre_apply_passed = pre_cr.succeeded
+
+    try:
+        sandbox_path = _create_sandbox(repo, branch_name)
+    except SandboxError as e:
+        return f"ERROR creating sandbox: {e}"
+
+    rename_entries = [
+        RenameEntry(file_path=e.file_path, old_name=e.old_name, new_name=e.new_name)
+        for e in stamped
+    ]
+    batch = rename_symbol_batch(rename_entries, str(sandbox_path))
+
+    if batch.error:
+        try:
+            _discard_sandbox(repo, branch_name)
+        except SandboxError:
+            pass
+        return (
+            f"## Rename failed after {len(batch.applied)}/{len(rename_entries)} rename(s)\n\n"
+            f"Error: {batch.error}\n\nSandbox discarded."
+        )
+
+    try:
+        _commit_in_sandbox(
+            sandbox_path,
+            f"refactor: {len(batch.applied)} rename(s) via codescaffold",
+        )
+    except subprocess.CalledProcessError as e:
+        return f"ERROR committing in sandbox: {e}"
+
+    validation = run_validation(sandbox_path)
+
+    audit = ApplyAudit(
+        plan_hash=plan.graph_hash,
+        sandbox_branch=branch_name,
+        moves_applied=(),
+        rope_results=tuple(batch.rope_results),
+        validation=validation,
+        succeeded=validation.succeeded,
+        renames_applied=tuple(stamped),
+    )
+    audit.save(_audit_dir(repo_path))
+
+    is_contract_regression = pre_apply_passed is True and not validation.contracts_ok
+
+    lines = [
+        f"## Rename result — branch `{branch_name}`",
+        f"Renames applied: {len(batch.applied)}",
+        f"Validation: {'✓ passed' if validation.succeeded else '✗ failed'}",
+    ]
+    if not validation.succeeded:
+        lines.append(f"Failed steps: {', '.join(validation.failed_steps)}")
+        if validation.pytest_summary:
+            lines.append(f"```\n{validation.pytest_summary[:500]}\n```")
+    if warnings_list:
+        lines += ["", "Warnings (needs_review — proceed with care):"] + warnings_list
+
+    if is_contract_regression:
+        lines += [
+            "",
+            "⚠ Contract regression — contracts were passing before this apply.",
+            "",
+            "Two paths to resolve:",
+            "  1. Update the contract to reflect the new structure:",
+            f"     → call `update_contract(branch_name=\"{branch_name}\", repo_path=...)`",
+            "  2. See alternative move targets that satisfy the contract:",
+            f"     → call `propose_violation_fix(branch_name=\"{branch_name}\", repo_path=...)`",
+            "",
+            "Or call `discard_sandbox` to abandon.",
+        ]
+    else:
+        lines.append(
+            "\nRun `merge_sandbox` to merge, or `discard_sandbox` to abandon."
+            if validation.succeeded
+            else "\nRun `discard_sandbox` to clean up."
+        )
     return "\n".join(lines)

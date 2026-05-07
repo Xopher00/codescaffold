@@ -43,7 +43,8 @@ def build_package_dag(
     dag.add_nodes_from(set(node_to_pkg.values()))
 
     for u, v, data in G.edges(data=True):
-        if data.get("relation") not in ("imports_from", "calls", "uses"):
+        relation = data.get("relation")
+        if relation is not None and relation not in ("imports_from", "calls", "uses"):
             continue
         pu = node_to_pkg.get(u)
         pv = node_to_pkg.get(v)

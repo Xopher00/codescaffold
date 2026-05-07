@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from codescaffold.operations import RopeChangeResult
-from codescaffold.plans import ApprovedMove
+from codescaffold.plans import ApprovedMove, ApprovedRename
 from codescaffold.validation import ValidationResult
 
 
@@ -20,6 +20,7 @@ class ApplyAudit:
     rope_results: tuple[RopeChangeResult, ...]
     validation: ValidationResult
     succeeded: bool
+    renames_applied: tuple[ApprovedRename, ...] = ()
     timestamp: str = ""
 
     def __post_init__(self):
@@ -31,6 +32,7 @@ class ApplyAudit:
             "plan_hash": self.plan_hash,
             "sandbox_branch": self.sandbox_branch,
             "moves_applied": [m.model_dump() for m in self.moves_applied],
+            "renames_applied": [r.model_dump() for r in self.renames_applied],
             "rope_results": [
                 {
                     "changed_files": list(r.changed_files),

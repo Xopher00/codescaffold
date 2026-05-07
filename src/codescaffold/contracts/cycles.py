@@ -2,46 +2,23 @@
 
 from __future__ import annotations
 
-import sys
 from collections import Counter
-from pathlib import Path
 
-import grimp
 import networkx as nx
 
 from codescaffold.candidates import MoveCandidate
 from codescaffold.graphify import GraphSnapshot
 
 from .models import CycleReport
-from .package_graph import detect_root_package
 
 
-def detect_package_cycles(
-    repo_path: Path,
-    snap: GraphSnapshot,
-    src_root: str = "src",
-) -> list[CycleReport]:
-    """Detect package-level import cycles using grimp (excludes TYPE_CHECKING imports).
+def detect_package_cycles(snap: GraphSnapshot) -> list[CycleReport]:
+    """Detect package-level cycles from the snapshot's package graph.
 
     Returns an empty list if the package graph is acyclic.
     """
-    src = str(Path(repo_path) / src_root)
-    if src not in sys.path:
-        sys.path.insert(0, src)
-    root_pkg = detect_root_package(Path(repo_path))
-    g = grimp.build_graph(root_pkg, exclude_type_checking_imports=True)
-
-    dag: nx.DiGraph = nx.DiGraph()
-    for mod in g.modules:
-        parts = mod.split(".")
-        pkg = ".".join(parts[:2]) if len(parts) >= 2 else parts[0]
-        dag.add_node(pkg)
-        for upstream in g.find_modules_directly_imported_by(mod):
-            up_parts = upstream.split(".")
-            up_pkg = ".".join(up_parts[:2]) if len(up_parts) >= 2 else up_parts[0]
-            if pkg != up_pkg:
-                dag.add_edge(pkg, up_pkg)
-
+    from .package_graph import build_package_dag
+    dag = build_package_dag(snap)
     reports = []
     for cycle in nx.simple_cycles(dag):
         edges = tuple(zip(cycle, cycle[1:] + [cycle[0]]))

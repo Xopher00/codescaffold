@@ -52,12 +52,30 @@ class ApprovedMove(BaseModel):
     model_config = {"frozen": True}
 
 
+class ApprovedRename(BaseModel):
+    """A symbol rename the agent has approved for execution.
+
+    Preflight fields mirror CandidateRecord so the audit trail records why
+    each rename was admitted. None defaults preserve load-compat with plans
+    written before rename support was added.
+    """
+
+    file_path: str
+    old_name: str
+    new_name: str
+    resolution: RopeResolutionRecord | None = None
+    preflight: Literal["ready", "needs_review", "blocked"] | None = None
+
+    model_config = {"frozen": True}
+
+
 class Plan(BaseModel):
     """Persisted refactor plan. graph_hash guards against stale execution."""
 
     graph_hash: str
     candidates: list[CandidateRecord] = Field(default_factory=list)
     approved_moves: list[ApprovedMove] = Field(default_factory=list)
+    approved_renames: list[ApprovedRename] = Field(default_factory=list)
     created_at: datetime = Field(default_factory=lambda: datetime.now(tz=timezone.utc))
 
     model_config = {"frozen": True}
