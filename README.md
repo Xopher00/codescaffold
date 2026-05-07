@@ -132,6 +132,7 @@ analyze
 get_cluster_context
 approve_moves
 apply
+apply_rename_map
 validate
 merge_sandbox
 discard_sandbox
@@ -150,6 +151,7 @@ propose_violation_fix
 | `get_cluster_context`   | Show graph evidence for a community/cluster                                    |
 | `approve_moves`         | Record agent-approved moves into the persisted plan                            |
 | `apply`                 | Execute approved moves in a sandboxed worktree; runs compileall + pytest       |
+| `apply_rename_map`      | Batch-rename symbols/modules across the repo in a sandbox (single rope session) |
 | `validate`              | Re-run compileall + pytest inside an existing sandbox branch                   |
 | `merge_sandbox`         | Merge a completed sandbox branch into HEAD with --no-ff                        |
 | `discard_sandbox`       | Discard a sandbox branch and remove its worktree                               |
@@ -307,14 +309,7 @@ Supported contract concepts include:
 
 Contracts are intended to turn discovered structure into enforceable architecture.
 
-Open design question:
-
-```text
-Should generated contracts be temporary sandbox artifacts,
-or durable architecture guards that survive merge?
-```
-
-For long-term use, contracts should likely be durable, refreshable, and validated after moves/renames.
+Generated contracts are durable architecture guards, not temporary sandbox artifacts. They survive merge and are validated after every move or rename via `validate_contracts`. Use `update_contract` to regenerate them after a sandbox changes the layer structure.
 
 ## Rename and docstring workflow
 
@@ -343,11 +338,8 @@ agent writes or revises docstring
 `codescaffold` writes reviewable artifacts such as:
 
 ```text
-.refactor_plan/
-STRUCTURE_REPORT.md
-refactor_plan.json
-state.json
-.importlinter
+.importlinter          — import-linter contract (durable, survives merge)
+<repo>/.claude/plans/  — persisted plan JSON (graph hash + approved moves/renames)
 ```
 
 Exact artifacts may vary by workflow stage.
@@ -418,11 +410,12 @@ src/codescaffold/
     mcp/           thin MCP interface (tools.py, server.py)
     graphify/      graphify integration and graph snapshots
     candidates/    graph-informed move candidate proposals
+    bridge/        rope preflight resolution (Layer 1)
     plans/         plan schema, lifecycle, approval, staleness
     operations/    typed mechanical Rope operations
     sandbox/       git worktree isolation
     validation/    compileall + pytest + import-linter checks
-    contracts/     import-linter contract generation and violation recovery
+    contracts/     import-linter contract generation and violation recovery (grimp-based DAG)
     audit/         result summaries and durable records
 ```
 
@@ -430,17 +423,16 @@ src/codescaffold/
 
 Near-term:
 
-* `apply_rename_map` — batch-rename symbols/modules from a name mapping in a single sandbox pass
-* richer `get_cluster_context` — show inter-community edge weights and dominant source files
-
-Later:
-
 * **Pynguin test generation** — `generate_tests(source_file, repo_path)` MCP tool wrapping
   [pynguin](https://github.com/se2p/pynguin) for automatic test generation.
   Design constraints: run pynguin via subprocess into the repo's own venv (never import it
   into the MCP process — it instruments modules at runtime); write generated tests into a
   sandbox worktree so the agent can review and approve before committing, mirroring the
   `apply → audit → merge_sandbox` flow.
+* richer `get_cluster_context` — show inter-community edge weights and dominant source files
+
+Later:
+
 * contract staleness detection and incremental update
 * docstring insertion (LibCST-based)
 * rollback/manifest for applied moves
