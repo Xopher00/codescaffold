@@ -1,55 +1,91 @@
-"""Build a package-level DAG from a GraphSnapshot for contract generation."""
+"""Build a package-level DAG for contract generation, using grimp."""
 
 from __future__ import annotations
 
+import sys
 import tomllib
+from contextlib import contextmanager
 from pathlib import Path
+from typing import Generator
 
+import importlib
+import importlib.util
+
+import grimp
 import networkx as nx
 
-from codescaffold.graphify import GraphSnapshot
+
+@contextmanager
+def _prepend_syspath(path: Path) -> Generator[None, None, None]:
+    p = str(path.resolve())
+    sys.path.insert(0, p)
+    importlib.invalidate_caches()
+    try:
+        yield
+    finally:
+        try:
+            sys.path.remove(p)
+        except ValueError:
+            pass
+        importlib.invalidate_caches()
 
 
 def build_package_dag(
-    snap: GraphSnapshot,
-    src_root: str = "src",
+    repo_path: Path,
     root_package: str | None = None,
+    src_root: str = "src",
 ) -> nx.DiGraph:
-    """Build a directed package-level graph from a GraphSnapshot.
+    """Build a directed package-level DAG using grimp.
 
-    Groups symbol nodes by their immediate subpackage (rootpkg.subpkg).
-    When root_package is given, only nodes under that package are included,
-    excluding tests, fixtures, and sibling packages in the same repo.
-
-    Also handles graphify package-reference nodes (e.g. 'codescaffold_sandbox')
-    that are created for cross-package imports and carry no source_file attribute.
-    Returns a DiGraph whose nodes are subpackage strings and edges are import
-    relationships.
+    Nodes are squashed to at most two levels: 'rootpkg' and 'rootpkg.subpkg'.
+    Edges represent direct imports between packages. grimp is the same engine
+    import-linter uses internally, so this DAG and lint-imports results are
+    guaranteed consistent.
     """
-    G = snap.graph
-    node_to_pkg: dict[str, str] = {}
-    for node in G.nodes():
-        src = G.nodes[node].get("source_file", "")
-        pkg = _file_to_subpackage(src, src_root)
-        if not pkg and root_package:
-            pkg = _pkg_ref_node_to_package(node, root_package)
-        if pkg and (
-            root_package is None
-            or pkg.startswith(root_package + ".")
-        ):
-            node_to_pkg[node] = pkg
+    repo_path = Path(repo_path).resolve()
+    if root_package is None:
+        root_package = detect_root_package(repo_path)
+
+    src_dir = repo_path / src_root
+    syspath_target = src_dir if src_dir.is_dir() else repo_path
+    _modules_before = set(sys.modules)
+    with _prepend_syspath(syspath_target):
+        g = grimp.build_graph(root_package, include_external_packages=False)
+
+    # Purge only modules added by this grimp call (i.e. from the tmp_path fixture).
+    # Modules already in sys.modules before the call (e.g. codescaffold itself) are
+    # left intact so that mock patches on their objects remain valid.
+    for key in [
+        k for k in sys.modules
+        if k not in _modules_before
+        and (k == root_package or k.startswith(root_package + "."))
+    ]:
+        del sys.modules[key]
+
+    prefix = root_package + "."
+
+    def _squash(modname: str) -> str | None:
+        if modname == root_package:
+            return root_package
+        if not modname.startswith(prefix):
+            return None
+        sub = modname[len(prefix):].split(".", 1)[0]
+        return f"{root_package}.{sub}"
 
     dag: nx.DiGraph = nx.DiGraph()
-    dag.add_nodes_from(set(node_to_pkg.values()))
+    for mod in g.modules:
+        sq = _squash(mod)
+        if sq:
+            dag.add_node(sq)
 
-    for u, v, data in G.edges(data=True):
-        relation = data.get("relation")
-        if relation is not None and relation not in ("imports_from", "calls", "uses"):
+    for mod in g.modules:
+        u = _squash(mod)
+        if u is None:
             continue
-        pu = node_to_pkg.get(u)
-        pv = node_to_pkg.get(v)
-        if pu and pv and pu != pv:
-            dag.add_edge(pu, pv)
+        for imported in g.find_modules_directly_imported_by(mod):
+            v = _squash(imported)
+            if v and v != u:
+                dag.add_edge(u, v)
 
     return dag
 
@@ -82,23 +118,6 @@ def _file_to_subpackage(source_file: str, src_root: str = "src") -> str | None:
         # File is directly in rootpkg/
         return root
     return f"{root}.{sub}"
-
-
-def _pkg_ref_node_to_package(node_id: str, root_package: str) -> str | None:
-    """Map a graphify package-reference node to its dotted package name.
-
-    Graphify creates nodes like 'codescaffold_sandbox' for cross-package imports
-    whose target is a package, not a source file. These nodes have no source_file
-    attribute. Recognise the pattern '{root}_{subpkg}' and convert to dotted form.
-    Only single-component subpackage names are matched to avoid false positives
-    on deeper node IDs like 'codescaffold_mcp_tools'.
-    """
-    prefix = root_package + "_"
-    if node_id.startswith(prefix):
-        sub = node_id[len(prefix):]
-        if sub and "_" not in sub:
-            return f"{root_package}.{sub}"
-    return None
 
 
 def detect_root_package(repo_path: Path) -> str:

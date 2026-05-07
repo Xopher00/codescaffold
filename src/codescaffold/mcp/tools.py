@@ -24,6 +24,7 @@ from codescaffold.operations import (
     RenameEntry,
     RopeOperationError,
     close_rope_project,
+    move_and_rename_module,
     move_module,
     move_symbol,
     rename_symbol_batch,
@@ -294,7 +295,12 @@ def apply(branch_name: str, repo_path: str) -> str:
                     str(sandbox_path), move.source_file, move.symbol, move.target_file
                 )
             elif move.kind == "module":
-                result = move_module(str(sandbox_path), move.source_file, move.target_file)
+                if move.new_name:
+                    result = move_and_rename_module(
+                        str(sandbox_path), move.source_file, move.target_file, move.new_name
+                    )
+                else:
+                    result = move_module(str(sandbox_path), move.source_file, move.target_file)
             else:
                 apply_errors.append(f"Unsupported move kind: {move.kind}")
                 continue

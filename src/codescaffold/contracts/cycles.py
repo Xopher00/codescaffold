@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections import Counter
+from pathlib import Path
 
 import networkx as nx
 
@@ -12,13 +13,13 @@ from codescaffold.graphify import GraphSnapshot
 from .models import CycleReport
 
 
-def detect_package_cycles(snap: GraphSnapshot) -> list[CycleReport]:
-    """Detect package-level cycles from the snapshot's package graph.
+def detect_package_cycles(repo_path: Path, snap: GraphSnapshot) -> list[CycleReport]:
+    """Detect package-level cycles using grimp (same engine as import-linter).
 
     Returns an empty list if the package graph is acyclic.
     """
     from .package_graph import build_package_dag
-    dag = build_package_dag(snap)
+    dag = build_package_dag(repo_path)
     reports = []
     for cycle in nx.simple_cycles(dag):
         edges = tuple(zip(cycle, cycle[1:] + [cycle[0]]))

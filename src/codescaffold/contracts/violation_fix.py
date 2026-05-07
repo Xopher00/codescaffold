@@ -11,7 +11,7 @@ from codescaffold.candidates import MoveCandidate
 from codescaffold.graphify import GraphSnapshot
 from codescaffold.plans import ApprovedMove
 
-from .package_graph import _file_to_subpackage, build_package_dag
+from .package_graph import _file_to_subpackage
 
 
 def propose_alternatives(

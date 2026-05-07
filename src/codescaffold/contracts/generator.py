@@ -27,7 +27,7 @@ def generate_importlinter_config(repo_path: Path, snap: GraphSnapshot) -> Contra
     If the graph is acyclic, writes .importlinter and returns written=True.
     """
     repo_path = Path(repo_path).resolve()
-    cycles = detect_package_cycles(snap)
+    cycles = detect_package_cycles(repo_path, snap)
 
     config_path = str(repo_path / _CONFIG_FILENAME)
 
@@ -41,7 +41,7 @@ def generate_importlinter_config(repo_path: Path, snap: GraphSnapshot) -> Contra
         )
 
     root_package = detect_root_package(repo_path)
-    dag = build_package_dag(snap, root_package=root_package)
+    dag = build_package_dag(repo_path, root_package=root_package)
 
     # Condense SCCs so topological_generations works even if the graphify
     # semantic graph has cycles (which are not Python import cycles).

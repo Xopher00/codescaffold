@@ -1,7 +1,7 @@
 from .errors import RopeArgumentError, RopeOperationError, RopeRefactoringError, RopeUnexpectedError
 from .rename_ops import BatchRenameResult, RenameEntry, rename_symbol_batch
 from .results import RopeChangeResult, SymbolInfo
-from .rope_ops import close_rope_project, list_symbols, move_module, move_symbol, rename_symbol
+from .rope_ops import close_rope_project, list_symbols, move_and_rename_module, move_module, move_symbol, rename_symbol
 
 __all__ = [
     "RopeOperationError",
@@ -13,6 +13,7 @@ __all__ = [
     "move_symbol",
     "rename_symbol",
     "move_module",
+    "move_and_rename_module",
     "list_symbols",
     "close_rope_project",
     "RenameEntry",

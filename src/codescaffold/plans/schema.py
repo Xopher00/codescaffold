@@ -42,12 +42,17 @@ class CandidateRecord(BaseModel):
 
 
 class ApprovedMove(BaseModel):
-    """A move the agent has approved for execution by the operations layer."""
+    """A move the agent has approved for execution by the operations layer.
+
+    For module moves with new_name set, target_file is the destination folder
+    (not a file path); the module will be renamed to new_name at that location.
+    """
 
     kind: Literal["symbol", "module"]
     source_file: str
     symbol: str | None = None
     target_file: str
+    new_name: str | None = None  # module-only; None for symbol moves
 
     model_config = {"frozen": True}
 

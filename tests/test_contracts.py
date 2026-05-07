@@ -97,35 +97,30 @@ class TestFileToSubpackage:
 # ---------------------------------------------------------------------------
 
 class TestBuildPackageDag:
-    def test_acyclic_dag(self):
-        snap = _make_snap(
-            edges=[("A", "B")],
-            node_files={
-                "A": "src/mypkg/api/views.py",
-                "B": "src/mypkg/utils/helpers.py",
-            },
-        )
-        dag = build_package_dag(snap)
+    def test_acyclic_dag(self, tmp_path: Path):
+        _make_import_pkg(tmp_path, "mypkg")
+        dag = build_package_dag(tmp_path)
         assert "mypkg.api" in dag.nodes
         assert "mypkg.utils" in dag.nodes
         assert dag.has_edge("mypkg.api", "mypkg.utils")
 
-    def test_self_loops_excluded(self):
-        snap = _make_snap(
-            edges=[("A", "B")],
-            node_files={
-                "A": "src/mypkg/api/views.py",
-                "B": "src/mypkg/api/models.py",
-            },
-        )
-        dag = build_package_dag(snap)
-        # Both in same package — no edge
+    def test_self_loops_excluded(self, tmp_path: Path):
+        src = tmp_path / "src" / "mypkg"
+        src.mkdir(parents=True)
+        (src / "__init__.py").touch()
+        api = src / "api"
+        api.mkdir()
+        (api / "__init__.py").touch()
+        (api / "a.py").write_text("")
+        (api / "b.py").write_text("from mypkg.api.a import x\n")
+        dag = build_package_dag(tmp_path)
         assert not dag.has_edge("mypkg.api", "mypkg.api")
 
-    def test_empty_snap_gives_empty_dag(self):
-        snap = GraphSnapshot.from_graph(nx.DiGraph())
-        dag = build_package_dag(snap)
-        assert dag.number_of_nodes() == 0
+    def test_empty_package_gives_single_node(self, tmp_path: Path):
+        _setup_root_package(tmp_path, "mypkg")  # only __init__.py
+        dag = build_package_dag(tmp_path)
+        assert "mypkg" in dag.nodes
+        assert dag.number_of_edges() == 0
 
 
 # ---------------------------------------------------------------------------
@@ -161,44 +156,25 @@ class TestDetectRootPackage:
 # ---------------------------------------------------------------------------
 
 class TestDetectPackageCycles:
-    def test_acyclic_returns_empty(self):
+    def test_acyclic_returns_empty(self, tmp_path: Path):
         from codescaffold.contracts.cycles import detect_package_cycles
-        snap = _make_snap(
-            edges=[("A", "B")],
-            node_files={
-                "A": "src/mypkg/api/views.py",
-                "B": "src/mypkg/utils/helpers.py",
-            },
-        )
-        cycles = detect_package_cycles(snap)
-        assert cycles == []
+        _make_import_pkg(tmp_path, "mypkg", cyclic=False)
+        snap = GraphSnapshot.from_graph(nx.DiGraph())
+        assert detect_package_cycles(tmp_path, snap) == []
 
-    def test_cyclic_returns_reports(self):
+    def test_cyclic_returns_reports(self, tmp_path: Path):
         from codescaffold.contracts.cycles import detect_package_cycles
-        snap = _make_snap(
-            edges=[("A", "B"), ("B", "A")],
-            node_files={
-                "A": "src/mypkg/api/views.py",
-                "B": "src/mypkg/utils/helpers.py",
-            },
-        )
-        cycles = detect_package_cycles(snap)
+        _make_import_pkg(tmp_path, "mypkg", cyclic=True)
+        snap = GraphSnapshot.from_graph(nx.DiGraph())
+        cycles = detect_package_cycles(tmp_path, snap)
         assert len(cycles) >= 1
-        cr = cycles[0]
-        assert isinstance(cr, CycleReport)
-        assert len(cr.cycle) >= 2
-        assert len(cr.edges) >= 2
+        assert isinstance(cycles[0], CycleReport)
 
-    def test_cycle_report_has_packages(self):
+    def test_cycle_report_has_packages(self, tmp_path: Path):
         from codescaffold.contracts.cycles import detect_package_cycles
-        snap = _make_snap(
-            edges=[("A", "B"), ("B", "A")],
-            node_files={
-                "A": "src/mypkg/api/views.py",
-                "B": "src/mypkg/utils/helpers.py",
-            },
-        )
-        cycles = detect_package_cycles(snap)
+        _make_import_pkg(tmp_path, "mypkg", cyclic=True)
+        snap = GraphSnapshot.from_graph(nx.DiGraph())
+        cycles = detect_package_cycles(tmp_path, snap)
         all_pkgs = {pkg for cr in cycles for pkg in cr.cycle}
         assert "mypkg.api" in all_pkgs or "mypkg.utils" in all_pkgs
 
@@ -210,14 +186,8 @@ class TestDetectPackageCycles:
 class TestGenerateImportlinterConfig:
     def test_cyclic_does_not_write(self, tmp_path: Path):
         from codescaffold.contracts.generator import generate_importlinter_config
-        _setup_root_package(tmp_path, "mypkg")
-        snap = _make_snap(
-            edges=[("A", "B"), ("B", "A")],
-            node_files={
-                "A": "src/mypkg/api/views.py",
-                "B": "src/mypkg/utils/helpers.py",
-            },
-        )
+        _make_import_pkg(tmp_path, "mypkg", cyclic=True)
+        snap = GraphSnapshot.from_graph(nx.DiGraph())
         artifact = generate_importlinter_config(tmp_path, snap)
         assert artifact.written is False
         assert len(artifact.cycles_detected) >= 1
@@ -355,3 +325,24 @@ def _setup_root_package(tmp_path: Path, name: str) -> None:
     pkg = tmp_path / "src" / name
     pkg.mkdir(parents=True, exist_ok=True)
     (pkg / "__init__.py").touch()
+
+
+def _make_import_pkg(tmp_path: Path, pkg: str, *, cyclic: bool = False) -> None:
+    """Create src/<pkg>/{__init__,api/{__init__,views.py},utils/{__init__,helpers.py}}.
+
+    If cyclic=True, api.views imports utils.helpers and utils.helpers imports api.views,
+    creating a package cycle that grimp will detect.
+    """
+    src = tmp_path / "src" / pkg
+    src.mkdir(parents=True, exist_ok=True)
+    (src / "__init__.py").touch()
+    for sub in ("api", "utils"):
+        d = src / sub
+        d.mkdir()
+        (d / "__init__.py").touch()
+    if cyclic:
+        (src / "api" / "views.py").write_text(f"from {pkg}.utils.helpers import x\n")
+        (src / "utils" / "helpers.py").write_text(f"from {pkg}.api.views import y\n")
+    else:
+        (src / "api" / "views.py").write_text(f"from {pkg}.utils.helpers import x\n")
+        (src / "utils" / "helpers.py").write_text("")

@@ -72,6 +72,24 @@ def move_module(
     return RopeChangeResult(changed_files=tuple(data["changed_files"]))
 
 
+def move_and_rename_module(
+    project_path: str,
+    module_path: str,
+    dest_folder: str,
+    new_name: str,
+) -> RopeChangeResult:
+    # rope expects a bare module name, not a filename — strip .py if present
+    module_new_name = new_name[:-3] if new_name.endswith(".py") else new_name
+    args = dict(
+        project_path=project_path,
+        module_path=module_path,
+        dest_folder=dest_folder,
+        new_name=module_new_name,
+    )
+    data = _unwrap("move_and_rename_module", _rope.move_and_rename_module(**args), args)
+    return RopeChangeResult(changed_files=tuple(data["changed_files"]))
+
+
 def list_symbols(project_path: str, file_path: str) -> list[SymbolInfo]:
     args = dict(project_path=project_path, file_path=file_path)
     data = _unwrap("list_symbols", _rope.list_symbols(**args), args)
