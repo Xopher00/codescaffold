@@ -11,6 +11,7 @@ import subprocess
 from pathlib import Path
 
 from codescaffold.audit import ApplyAudit
+from codescaffold.bridge import resolve_candidates
 from codescaffold.candidates import propose_moves
 from codescaffold.contracts import (
     detect_package_cycles, 
@@ -76,7 +77,8 @@ def analyze(repo_path: str) -> str:
     snap = run_extract(Path(repo_path))
 
     candidates = propose_moves(snap)
-    records = candidates_to_records(candidates)
+    resolutions = resolve_candidates(candidates, Path(repo_path))
+    records = candidates_to_records(candidates, resolutions=resolutions)
     plan = Plan(graph_hash=snap.graph_hash, candidates=records)
     save(plan, _plan_path(repo_path))
 
@@ -101,13 +103,24 @@ def analyze(repo_path: str) -> str:
         lines.append(f"- Community {cid} ({len(nodes)} nodes): **{score:.2f}**{flag}")
     lines.append("")
 
-    lines += [f"## Move Candidates ({len(candidates)} found)"]
-    if candidates:
-        for c in candidates:
+    n_ready = sum(1 for r in records if r.preflight == "ready")
+    n_review = sum(1 for r in records if r.preflight == "needs_review")
+    n_blocked = sum(1 for r in records if r.preflight == "blocked")
+    preflight_summary = f"{n_ready} ready / {n_review} needs_review / {n_blocked} blocked"
+    lines += [f"## Move Candidates ({len(candidates)} found — {preflight_summary})"]
+    if records:
+        for r in records:
+            tag = r.preflight or "unknown"
+            detail = ""
+            if r.resolution and r.resolution.reason:
+                detail = f": {r.resolution.reason}"
+                if r.resolution.near_misses:
+                    detail += f" — did you mean: {', '.join(r.resolution.near_misses)}"
+            sym_part = f"`{r.symbol}` in " if r.symbol else ""
             lines.append(
-                f"- `{c.symbol}` in `{c.source_file}` → `{c.target_file}` [{c.confidence} confidence]"
+                f"- [{tag}{detail}] {sym_part}`{r.source_file}` → `{r.target_file}` [{r.confidence} confidence]"
             )
-            for reason in c.reasons:
+            for reason in r.reasons:
                 lines.append(f"  - {reason}")
     else:
         lines.append("- *(no candidates — graph is well-structured)*")
@@ -122,7 +135,7 @@ def analyze(repo_path: str) -> str:
     lines.append("")
 
     lines.append(
-        f"**Plan saved.** {len(candidates)} candidate(s). "
+        f"**Plan saved.** {len(candidates)} candidate(s) ({preflight_summary}). "
         "Run `approve_moves` with your selection to proceed."
     )
 
@@ -194,6 +207,33 @@ def approve_moves(moves: list[dict], repo_path: str) -> str:
     if errors:
         return "Validation errors:\n" + "\n".join(errors)
 
+    candidate_index: dict[tuple[str, str | None, str], object] = {
+        (r.source_file, r.symbol, r.target_file): r for r in plan.candidates
+    }
+
+    blocked: list[str] = []
+    warnings: list[str] = []
+    for m in approved:
+        record = candidate_index.get((m.source_file, m.symbol, m.target_file))
+        if record is None:
+            sym = f"`{m.symbol}` in " if m.symbol else ""
+            warnings.append(f"  ⚠ no preflight (handcrafted): {sym}`{m.source_file}` → `{m.target_file}`")
+        elif record.preflight == "blocked":  # type: ignore[union-attr]
+            reason = record.resolution.reason if record.resolution else "unknown"  # type: ignore[union-attr]
+            near = ", ".join(record.resolution.near_misses) if record.resolution and record.resolution.near_misses else ""  # type: ignore[union-attr]
+            sym = f"`{m.symbol}` in " if m.symbol else ""
+            msg = f"  ✗ blocked: {sym}`{m.source_file}` → `{m.target_file}` — {reason}"
+            if near:
+                msg += f" (did you mean: {near})"
+            blocked.append(msg)
+        elif record.preflight == "needs_review":  # type: ignore[union-attr]
+            reason = record.resolution.reason if record.resolution else ""  # type: ignore[union-attr]
+            sym = f"`{m.symbol}` in " if m.symbol else ""
+            warnings.append(f"  ⚠ needs_review: {sym}`{m.source_file}` → `{m.target_file}` — {reason}")
+
+    if blocked:
+        return "Blocked moves — fix these before approving:\n" + "\n".join(blocked)
+
     updated = Plan(
         graph_hash=plan.graph_hash,
         candidates=plan.candidates,
@@ -206,6 +246,9 @@ def approve_moves(moves: list[dict], repo_path: str) -> str:
     for m in approved:
         sym = f"`{m.symbol}` in " if m.symbol else ""
         lines.append(f"- {m.kind}: {sym}`{m.source_file}` → `{m.target_file}`")
+    if warnings:
+        lines.append("\nWarnings:")
+        lines.extend(warnings)
     lines.append("\nRun `apply` with a branch name to execute.")
     return "\n".join(lines)
 

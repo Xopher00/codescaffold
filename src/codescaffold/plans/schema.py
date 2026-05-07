@@ -8,6 +8,22 @@ from typing import Literal
 from pydantic import BaseModel, Field
 
 
+class RopeResolutionRecord(BaseModel):
+    """Serialisable mirror of bridge.RopeResolution — stored in the plan file.
+
+    None defaults on all optional fields preserve load-compat with plans written
+    before preflight was introduced.
+    """
+
+    status: Literal["resolved", "ambiguous", "not_found", "not_top_level", "not_python", "error"]
+    symbol_kind: Literal["class", "function", "variable"] | None = None
+    line: int | None = None
+    near_misses: list[str] = Field(default_factory=list)
+    reason: str | None = None
+
+    model_config = {"frozen": True}
+
+
 class CandidateRecord(BaseModel):
     """Serialisable mirror of candidates.MoveCandidate — stored in the plan file."""
 
@@ -18,6 +34,9 @@ class CandidateRecord(BaseModel):
     community_id: int
     reasons: list[str]
     confidence: Literal["high", "medium", "low"]
+    # Preflight fields — None for plans written before preflight was introduced.
+    resolution: RopeResolutionRecord | None = None
+    preflight: Literal["ready", "needs_review", "blocked"] | None = None
 
     model_config = {"frozen": True}
 
